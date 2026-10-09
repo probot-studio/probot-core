@@ -1,180 +1,220 @@
 # Probot
 
-ESP32 tabanlı robot yarışması iletişim kütüphanesi. Robot bir WiFi
-erişim noktası açar, tarayıcıdan çalışan Driver Station arayüzü sunar
-ve joystick verisini WebSocket ile düşük gecikmeyle robota taşır.
+Türkçe: [README.tr.md](README.tr.md)
 
-**dev (0.4.0 adayı)** · ESP32 / ESP32-S3 · [Dokümanlar](https://probotstudio.com/docs) ·
-[API Referansı](API.md) · [English summary below](#probot-en)
+Communication library for ESP32-based robotics competitions. The robot hosts
+a WiFi access point, serves a browser-based Driver Station, and carries
+joystick input to the robot over a low-latency WebSocket (binary frames at
+50 Hz) with automatic failsafes: input is zeroed after 500 ms without
+joystick data and the robot stops after 10 s of Driver Station silence.
+
+**dev (0.4.0 candidate)** · ESP32 / ESP32-S3 · [Docs](https://probotstudio.com/docs) ·
+[API reference](API.md) · [Changelog](CHANGELOG.md)
 
 ---
 
-## Kurulum
+## Supported hardware
 
-1. **Kütüphane:** Arduino IDE → Library Manager → **"probot"** ara → Install.
-   Ya da en güncel sürüm için:
+- Target: **ESP32-S3**. The library is developed for the ESP32-S3; other
+  ESP32 variants may be adaptable but are outside the official support
+  scope.
+- Recommended board: Boardoza Pulse S32-S3
+  ([purchase](https://boardoza.com/product/boardoza-pulse-s32-s3-breakout-board/)).
+- Requires the Arduino-ESP32 core **3.x** (the ESP-IDF component metadata
+  asks for `espressif/arduino-esp32 >= 3.0.0` and ESP-IDF `>= 5.0`).
+- Built-in status LED support depends on the Adafruit NeoPixel library.
+
+## Installation
+
+### Arduino IDE
+
+1. **Library:** Arduino IDE → Library Manager → search for **"probot"** →
+   Install. For the latest version instead:
    ```bash
    git clone https://github.com/probot-studio/probot-core ~/Arduino/libraries/probot-core
    ```
-2. **ESP32 core:** Boards Manager → "esp32" (Espressif) → **3.x** kurulu olmalı.
-3. **Kart:** `ESP32S3 Dev Module` (veya `ESP32 Dev Module`).
-4. **Partition:** Tools → Partition Scheme → **Huge APP (3MB No OTA)**.
-   Bu ayar şart — varsayılan bölüm yetersiz, derleme sığmaz.
+2. **ESP32 core:** Boards Manager → "esp32" (Espressif) → version **3.x**
+   must be installed.
+3. **Board:** `ESP32S3 Dev Module` (or `ESP32 Dev Module`).
+4. **Partition scheme:** Tools → Partition Scheme → **Huge APP (3MB No OTA)**.
+   This setting is required: the default partition is too small and the
+   build will not fit.
 
-## İlk robot (5 dakika)
+### arduino-cli
+
+The repository's Makefile builds the examples with `arduino-cli` (default
+board `esp32:esp32:esp32s3`). See [Development](#development-and-testing).
+
+### PlatformIO
+
+```ini
+lib_deps = https://github.com/probot-studio/probot-core.git
+```
+
+### ESP-IDF with the Arduino component
+
+The repository ships an ESP-IDF component (`CMakeLists.txt`,
+`idf_component.yml`; it requires the `arduino` component). Call
+`probot::runtime_setup()` from your application.
+
+## Your first robot (5 minutes)
 
 ```cpp
 #define PROBOT_WIFI_AP_SSID     "MyRobot"
-#define PROBOT_WIFI_AP_PASSWORD "robot1234"   // en az 8 karakter
-#define PROBOT_WIFI_AP_CHANNEL  1             // 1-13 (yarışmada elle dağıtın)
+#define PROBOT_WIFI_AP_PASSWORD "robot1234"   // at least 8 characters
+#define PROBOT_WIFI_AP_CHANNEL  1             // 1-13 (assign by hand at a competition)
 #include <probot.h>
 
-void teleopInit() {}               // TeleOp seçiliyken INIT'e basınca 1 kez
+void teleopInit() {}               // once, when INIT is pressed with TeleOp selected
 
-void teleopLoop() {                // ~50 Hz tekrar çağrılır
+void teleopLoop() {                // called repeatedly (~50 Hz)
   auto js = probot::io::joystick_api::makeDefault();
-  float ileri = js.getLeftY();     // -1..+1 (ileri pozitif)
-  bool  buton = js.getA();
-  // motor kodun burada
+  float forward = js.getLeftY();   // -1..+1 (forward is positive)
+  bool  button  = js.getA();
+  // your motor code goes here
   delay(20);
 }
-void teleopStop() {}               // TeleOp'tan her çıkışta güvenli durdur
+void teleopStop() {}               // stop safely every time TeleOp is left
 
 void autonomousInit() {}
 void autonomousLoop() { delay(100); }
-void autonomousStop() {}           // Auto'dan her çıkışta güvenli durdur
+void autonomousStop() {}           // stop safely every time Auto is left
 ```
 
-> `setup()` ve `loop()` **tanımlamayın** — kütüphane kendisi tanımlar.
-> Dört güvenlik hook'u (`autonomousLoop/Stop`, `teleopLoop/Stop`) zorunludur.
-> `init` hook'ları opsiyoneldir; ana iskelette donanım hazırlığı için gösterilir.
+> Do **not** define `setup()` or `loop()`: the library defines them.
+> The four safety hooks (`autonomousLoop/Stop`, `teleopLoop/Stop`) are
+> mandatory. The `init` hooks are optional; the main skeleton shows them for
+> hardware preparation.
 
-1. Yükle → Serial monitörde IP'yi gör (`192.168.4.1`).
-2. Tablet/telefonu `MyRobot` WiFi ağına bağla — karşılama sayfası
-   kendiliğinden açılır (captive portal).
-3. Açılmazsa tarayıcıda `http://192.168.4.1` aç.
-4. Kumandayı tablete bağla (USB/Bluetooth) → modu seç → **Init** → **Start**.
+1. Upload, then read the IP from the Serial monitor (`192.168.4.1`).
+2. Connect a tablet or phone to the `MyRobot` WiFi network. The welcome page
+   opens by itself (captive portal).
+3. If it does not, open `http://192.168.4.1` in a browser.
+4. Connect a gamepad to the tablet (USB/Bluetooth), select the mode, then
+   press **Init** and **Start**.
 
-## Örnekler
+## Examples
 
-| Örnek | Ne yapar |
+| Example | What it does |
 |---|---|
-| `JoystickTest` | Eksen/buton değerlerini Serial'e ve telemetri paneline basar. İlk deneme için. |
-| `TankDrive` | Çift motor tank sürüşü (BTS7960/IBT-2 tarzı sürücü). Motor kodunun şablonu. |
-| `ServoTest` | Joystick ile servo kontrolü — titreşimsiz servo kullanımının doğru yolu. |
+| `JoystickTest` | Prints axis/button values to Serial and the telemetry panel. Good first test. |
+| `TankDrive` | Two-motor tank drive (BTS7960/IBT-2 style driver). A template for motor code. |
+| `ServoTest` | Servo control from the joystick: the correct jitter-free way to drive servos. |
 
-## Ayar makroları
+## Configuration macros
 
-Hepsi `#include <probot.h>` satırından **önce** tanımlanır:
+All of them are defined **before** the `#include <probot.h>` line.
 
-| Makro | Varsayılan | Açıklama |
+| Macro | Default | Description |
 |---|---|---|
-| `PROBOT_WIFI_AP_SSID` | `Probot-XXXXXX` | AP adı. Tanımsız bırakılırsa MAC eki otomatik açılır. Ek açıkken en fazla 25, kapalıyken 32 karakter |
-| `PROBOT_WIFI_AP_PASSWORD` | — (zorunlu) | AP şifresi (≥8 karakter) |
-| `PROBOT_WIFI_AP_CHANNEL` | — (zorunlu) | AP kanalı, **1-13**. Yarışmada robotlara elle farklı kanal verin |
-| `PROBOT_WIFI_AUTO_CHANNEL` | `0` | `1`: robot açılışta bandı tarayıp en boş kanalı **kendi** seçer. **Filoda önerilmez** (bkz. kanal planı), sadece tek robot için |
-| `PROBOT_WIFI_AP_SSID_MAC_SUFFIX` | kapalı | SSID sonuna `-XXXXXX` (MAC) ekler |
-| `PROBOT_DS_TIMEOUT_MS` | `10000` | DS'ten veri kesilirse timeout (ms) |
-| `PROBOT_DS_TIMEOUT_FORCE_STOP` | `1` | `1`: timeout'ta robot STOP. `0`: loop sürer, joystick nötr, bağlantı dönünce devam |
-| `PROBOT_DS_OWNER_TIMEOUT_MS` | `5000` | Sahip client sessiz kalırsa slotun boşalma süresi |
-| `PROBOT_INPUT_TIMEOUT_MS` | `500` | Joystick verisi kesilince eksenlerin sıfırlanma süresi |
-| `PROBOT_WIFI_ENABLE_11B` | `0` | `1`: 802.11b hızlarını aç (sadece 2010 öncesi cihazlar için; beacon airtime'ını 6 kat artırır) |
-| `PROBOT_WIFI_PMF_REQUIRED` | `0` | `1`: PMF (802.11w) zorunlu — deauth sahteciliğine karşı koruma, eski tabletlerle uyumsuz olabilir |
-| `PROBOT_CAPTIVE_PORTAL` | `1` | Ağa katılan cihazda karşılama sayfası kendiliğinden açılır; `0` kapatır |
-| `NEOPIXEL_PIN` / `NEOPIXEL_COUNT` | `3` / `1` | Durum LED'i pini/adedi |
-| `PROBOT_LOOP_DEADLINE_MS` | `2000` | InitLoop/loop turu bu süreyi aşarsa "stalled": input sıfır, halt-safe (öldürme/reboot yok) |
-| `PROBOT_WDT_TIMEOUT_S` | `8` | Donanım watchdog (yalnız sysloop; bir *kütüphane* kilidi reboot ettirir, kullanıcı kodu değil) |
-| `PROBOT_ESTOP_ENABLE_PIN` | `-1` | Kütüphanenin sürdüğü enable GPIO'su (motor sürücü enable / kontaktör). Boot'ta HIGH, acil durdurmada LOW |
-| `PROBOT_ESTOP_END_MS` | `500` | Acil durdurmada aktif OpMode `stop()`una tanınan süre; aşılırsa çip reboot eder |
-| `PROBOT_RSL_PIN` | `-1` | Sinyal lambası (RSL) digital pini: hareket edebilirken blink, yoksa sabit açık |
-| `PROBOT_BATTERY_ADC_PIN` | kapalı | Batarya ölçümü, yöntem 1: gerilim bölücünün orta ucu. **ADC1 pini şart (GPIO1-10)** — ADC2 WiFi açıkken çalışmaz [PB-E104] |
-| `PROBOT_BATTERY_R_TOP_K` / `_R_BOT_K` | — | Bölücü dirençleri, kΩ (batarya tarafı / GND tarafı). 3S için öneri: 100k/22k → 12.6 V'ta 2.27 V |
-| `PROBOT_BATTERY_INA` | kapalı | Batarya ölçümü, yöntem 2: I2C sensör — `219` ya da `226`. ADC yöntemiyle birlikte kullanılamaz [PB-E105] |
-| `PROBOT_BATTERY_INA_ADDR` | `0x40` | INA I2C adresi |
-| `PROBOT_BATTERY_INA_SDA` / `_SCL` | kart default'u | INA için I2C pinleri |
-| `PROBOT_BATTERY_TRIM` | `1.0f` | Multimetreyle ince ayar çarpanı (0.5-2.0) |
-| `USER_LOOP_PERIOD_MS` | `20` | InitLoop/loop çağrı periyodu (~50 Hz) |
-| `NEOPIXEL_BRIGHTNESS` | `32` | Durum LED'i parlaklığı (0-255) |
+| `PROBOT_WIFI_AP_SSID` | `Probot-XXXXXX` | AP name. If left undefined, a MAC suffix is added automatically. At most 25 characters with the suffix, 32 without |
+| `PROBOT_WIFI_AP_PASSWORD` | none (required) | AP password (at least 8 characters) |
+| `PROBOT_WIFI_AP_CHANNEL` | none (required) | AP channel, **1-13**. At a competition, give each robot a different channel by hand |
+| `PROBOT_WIFI_AUTO_CHANNEL` | `0` | `1`: at boot the robot scans the band and picks the emptiest channel **itself**. **Not recommended for a fleet** (see the channel plan); single-robot use only |
+| `PROBOT_WIFI_AP_SSID_MAC_SUFFIX` | off | Appends `-XXXXXX` (MAC) to the SSID |
+| `PROBOT_DS_TIMEOUT_MS` | `10000` | Timeout (ms) when data from the Driver Station stops |
+| `PROBOT_DS_TIMEOUT_FORCE_STOP` | `1` | `1`: the robot STOPs on timeout. `0`: the loop keeps running, joystick is neutral, and control resumes when the link returns |
+| `PROBOT_DS_OWNER_TIMEOUT_MS` | `5000` | How long the owner client may stay silent before its slot is freed |
+| `PROBOT_INPUT_TIMEOUT_MS` | `500` | Time after which axes are zeroed when joystick data stops |
+| `PROBOT_WIFI_ENABLE_11B` | `0` | `1`: enable 802.11b rates (only for pre-2010 devices; multiplies beacon airtime by 6) |
+| `PROBOT_WIFI_PMF_REQUIRED` | `0` | `1`: require PMF (802.11w), protection against deauth spoofing; may be incompatible with older tablets |
+| `PROBOT_CAPTIVE_PORTAL` | `1` | A device joining the network opens the welcome page by itself; `0` disables it |
+| `NEOPIXEL_PIN` / `NEOPIXEL_COUNT` | `3` / `1` | Status LED pin / count |
+| `PROBOT_LOOP_DEADLINE_MS` | `2000` | If an InitLoop/loop pass exceeds this, the robot is "stalled": input zeroed, held halt-safe (no kill, no reboot) |
+| `PROBOT_WDT_TIMEOUT_S` | `8` | Hardware watchdog (sysloop only; a stuck *library* lock reboots the chip, user code does not) |
+| `PROBOT_ESTOP_ENABLE_PIN` | `-1` | Enable GPIO driven by the library (motor driver enable / contactor). HIGH at boot, LOW on emergency stop |
+| `PROBOT_ESTOP_END_MS` | `500` | Time granted to the active OpMode `stop()` on emergency stop; the chip reboots if it is exceeded |
+| `PROBOT_RSL_PIN` | `-1` | Robot signal light (RSL) digital pin: blinks while the robot may move, solid otherwise |
+| `PROBOT_BATTERY_ADC_PIN` | off | Battery measurement, method 1: midpoint of a voltage divider. **Must be an ADC1 pin (GPIO1-10)**: ADC2 does not work while WiFi is on [PB-E104] |
+| `PROBOT_BATTERY_R_TOP_K` / `_R_BOT_K` | none | Divider resistors in kΩ (battery side / GND side). Suggestion for 3S: 100k/22k, which gives 2.27 V at 12.6 V |
+| `PROBOT_BATTERY_INA` | off | Battery measurement, method 2: I2C sensor, `219` or `226`. Cannot be combined with the ADC method [PB-E105] |
+| `PROBOT_BATTERY_INA_ADDR` | `0x40` | INA I2C address |
+| `PROBOT_BATTERY_INA_SDA` / `_SCL` | board default | I2C pins for the INA |
+| `PROBOT_BATTERY_TRIM` | `1.0f` | Fine-tuning multiplier against a multimeter (0.5-2.0) |
+| `USER_LOOP_PERIOD_MS` | `20` | Call period of InitLoop/loop (~50 Hz) |
+| `NEOPIXEL_BRIGHTNESS` | `32` | Status LED brightness (0-255) |
 
-## Yarışma günü: kanal planı
+## Competition day: channel plan
 
-- Varsayılanlarımız **1, 6, 11** (2.4 GHz'te birbirini ezmeyen klasik
-  üçlü) — otomatik kanal seçimi bu üçünden en boşunu alır. Zorunlu
-  değil: `PROBOT_WIFI_AP_CHANNEL` ile 1-13 arası her kanal verilebilir.
-  Aynı anda çalışan robotlara farklı ve sabit kanallar vermek
-  (deterministik atama) koordineli bir filoda en güvenli yöntemdir.
-- Kanal yarışma günü **yeniden flash gerektirmeden** değiştirilebilir:
-  Logs sayfası → Kanal Değiştir. 1-13 arası seçimler CSA ile canlı
-  uygulanır (uyumlu istemciler bağlantıyı koparmadan takip eder) ve
-  kalıcı kaydedilir. Maç **sırasında** değiştirmeyin — bazı tabletler
-  CSA'yı takip etmeyip birkaç saniye kopabilir.
-- Bazı dizüstü/tablet'ler bölge kilidi yüzünden **kanal 12-13'ü
-  görmez**. Bir cihaz robotu bulamıyorsa o robota 1-11 arası bir kanal
-  verin.
-- **Otomatik kanal seçimi (`PROBOT_WIFI_AUTO_CHANNEL 1`) varsayılan
-  KAPALIDIR ve filoda önerilmez.** Her robot bandı bağımsız tarar;
-  robotlar aynı anda açıldığında hiçbiri henüz yayın yapmadığından
-  bandı boş görür ve **hepsi aynı kanala (kanal 1) düşebilir** —
-  dağıtmak yerine yığar. Yalnızca ortamda tek robot varken
-  (ev/atölye) mantıklıdır. Seçilen kanal Serial'de ve Logs sayfasında
-  görünür.
-- Telefon hotspot'ları ve seyirci cihazları da 2.4 GHz'i doldurur —
-  maç sırasında robot çevresinde hotspot açtırmayın.
-- Sinyal sorunlarını sahada ayıklamak için `/health` endpoint'i RSSI
-  verir; -70 dBm'den kötüyse mesafe/anten sorununa bakın.
+- Our defaults are **1, 6, 11**, the classic trio that does not overlap on
+  2.4 GHz; automatic channel selection picks the emptiest of these three.
+  This is not mandatory: any channel from 1 to 13 can be given with
+  `PROBOT_WIFI_AP_CHANNEL`. Giving simultaneously running robots different,
+  fixed channels (deterministic assignment) is the safest method for a
+  coordinated fleet.
+- The channel can be changed on competition day **without reflashing**:
+  Logs page → Change Channel. Selections from 1 to 13 are applied live with
+  CSA (compatible clients follow without dropping) and saved persistently.
+  Do not change it **during** a match: some tablets do not follow CSA and
+  may drop for a few seconds.
+- Some laptops and tablets **cannot see channels 12-13** because of regional
+  locks. If a device cannot find a robot, give that robot a channel between
+  1 and 11.
+- **Automatic channel selection (`PROBOT_WIFI_AUTO_CHANNEL 1`) is OFF by
+  default and is not recommended for a fleet.** Each robot scans the band
+  independently; when robots power on at the same time, none is transmitting
+  yet, so each sees an empty band and **all of them may land on the same
+  channel (channel 1)**: it piles them up instead of spreading them. It only
+  makes sense when there is a single robot in the environment (home or
+  workshop). The selected channel is shown on Serial and on the Logs page.
+- Phone hotspots and spectator devices also fill 2.4 GHz; do not let anyone
+  start a hotspot around the robots during a match.
+- To debug signal problems in the field, the `/health` endpoint reports
+  RSSI; if it is worse than -70 dBm, look at distance or antenna problems.
 
-## Servo kullanımı (titreme çözümü)
+## Servo usage (fixing jitter)
 
-Servo titremesinin iki yaygın sebebi var; ikisi de kütüphane dışında:
+Servo jitter has two common causes, and both are outside the library:
 
-1. **Timer çakışması:** `analogWrite` (motorlar, ~1 kHz) ile servo (50 Hz)
-   aynı LEDC timer'ına düşerse biri diğerinin frekansını bozar. probot bir
-   servo sınıfı vermez (donanımı sen sürersin); titremeyi önlemek için
-   servoya **yüksek bir LEDC kanalı** verin — motorların `analogWrite`'ı
-   alttan (0,1,2…) kullandığı için çakışmaz:
+1. **Timer conflict:** if `analogWrite` (motors, ~1 kHz) and a servo (50 Hz)
+   land on the same LEDC timer, one corrupts the other's frequency. probot
+   provides no servo class (you drive the hardware); to prevent jitter, give
+   the servo a **high LEDC channel**. Motor `analogWrite` uses channels from
+   the bottom (0, 1, 2...), so they do not collide:
    ```cpp
    #define SERVO_PIN 4
-   void teleopInit() { ledcAttachChannel(SERVO_PIN, 50, 14, 7); } // 50 Hz, 14-bit, kanal 7
+   void teleopInit() { ledcAttachChannel(SERVO_PIN, 50, 14, 7); } // 50 Hz, 14-bit, channel 7
    void teleopLoop() {
-     uint16_t us = 500 + (angle/180.0f)*2000;        // 0-180° -> 500-2500 µs
+     uint16_t us = 500 + (angle/180.0f)*2000;        // 0-180 deg -> 500-2500 us
      ledcWrite(SERVO_PIN, (uint32_t)us * 16383 / 20000);
    }
-   void teleopStop() { ledcWrite(SERVO_PIN, 0); }    // darbeyi kes
+   void teleopStop() { ledcWrite(SERVO_PIN, 0); }    // cut the pulse
    ```
-   Tam örnek: `examples/ServoTest`.
-2. **Güç:** Servoyu ESP32'nin 5V/3V3 pininden beslemeyin. WiFi anlık
-   akım çekişleri gerilimi düşürür, servo seğirir. Servoya **ayrı 5-6V
-   kaynak (BEC/UBEC)** verin, toprakları ortak bağlayın.
+   Full example: `examples/ServoTest`.
+2. **Power:** do not power the servo from the ESP32's 5V/3V3 pin. Momentary
+   WiFi current draws sag the voltage and the servo twitches. Give the servo
+   a **separate 5-6 V supply (BEC/UBEC)** and join the grounds.
 
-PCA9685 kullanıyorsanız: servo çıkışları için PWM frekansı **50 Hz**
-olmalı (1 kHz'te servo darbe genişliği fiziksel olarak üretilemez).
+If you use a PCA9685, the PWM frequency for servo outputs must be **50 Hz**
+(at 1 kHz a servo pulse width physically cannot be produced).
 
-## Durum LED'i ve RSL
+## Status LED and RSL
 
-Builtin NeoPixel **yalnız maç durumunu** gösterir, rengini kütüphane sürer —
-elle renk atama API'si yoktur (LED'in rengi hep bir anlam taşır).
+The built-in NeoPixel shows **only the match state**, and the library drives
+its color. There is no API to set a color by hand, because the LED color
+always carries a meaning.
 
-| Renk | Anlam |
+| Color | Meaning |
 |---|---|
-| Mavi sabit | DS bağlı değil |
-| Mavi yanıp sönüyor | DS bağlı + STOPPED |
-| Sarı sabit | INIT (Auto veya TeleOp), Start bekleniyor |
-| Sarı yanıp sönüyor | TRANSITION: Auto bitti, TeleOp önseçili; Init bekleniyor |
-| Turuncu yanıp sönüyor | AUTO_RUN |
-| Yeşil yanıp sönüyor | TELEOP_RUN |
-| Kırmızı yanıp sönüyor | Stalled — loop 2 sn'den uzun döndü, güvende tutuluyor |
-| Kırmızı sabit | Acil durdurma (kilitli, reboot gerekli) |
+| Solid blue | DS not connected |
+| Blinking blue | DS connected + STOPPED |
+| Solid yellow | INIT (Auto or TeleOp), waiting for Start |
+| Blinking yellow | TRANSITION: Auto finished, TeleOp preselected; waiting for Init |
+| Blinking orange | AUTO_RUN |
+| Blinking green | TELEOP_RUN |
+| Blinking red | Stalled: a loop took longer than 2 s, being held safe |
+| Solid red | Emergency stop (latched, reboot required) |
 
-**RSL (sinyal lambası):** `#define PROBOT_RSL_PIN <gpio>` verirseniz kütüphane
-o digital pini yalnız AUTO_RUN/TELEOP_RUN'da yanıp söndürür; INIT, STOPPED,
-TRANSITION ve E-stop'ta **sabit açık** tutar.
+**RSL (robot signal light):** if you `#define PROBOT_RSL_PIN <gpio>`, the
+library blinks that digital pin only in AUTO_RUN/TELEOP_RUN, and keeps it
+**solid on** in INIT, STOPPED, TRANSITION and E-stop.
 
-## Batarya ölçümü
+## Battery measurement
 
-Arayüzdeki batarya göstergesini beslemenin üç yolu var (hiçbiri açık değilse
-gösterge "Veri yok" der):
+There are three ways to feed the battery gauge in the UI (if none is
+enabled, the gauge says "Veri yok", meaning no data):
 
-**1) Gerilim bölücü + ADC** — iki dirençle en ucuz çözüm:
+**1) Voltage divider + ADC:** the cheapest option, two resistors.
 
 ```
 BAT+ ──[100k]──┬──[22k]── GND
@@ -183,174 +223,182 @@ BAT+ ──[100k]──┬──[22k]── GND
 ```
 
 ```cpp
-#define PROBOT_BATTERY_ADC_PIN  5     // GPIO1-10 arası ŞART (ADC1)
+#define PROBOT_BATTERY_ADC_PIN  5     // MUST be GPIO1-10 (ADC1)
 #define PROBOT_BATTERY_R_TOP_K  100
 #define PROBOT_BATTERY_R_BOT_K  22
 ```
 
-- Pin **GPIO1-10** arasından seçilmeli: ADC2 pinleri (GPIO11-20) WiFi
-  açıkken çalışmaz — yanlış pin derlemede [PB-E104] ile yakalanır.
-- 100k/22k, 3S LiPo'nun 12.6 V tepesini 2.27 V'a indirir (ADC'nin doğrusal
-  bölgesi). Orta uca 100nF kondansatör koyun; bölücüyü **ana anahtarın
-  sonrasına** bağlayın ki robot kapalıyken pili süzmesin (~0.1 mA).
-- Okuma eFuse kalibrasyonlu, 8 örnek ortalama + yumuşatma ile ~%1-2
-  doğruluktadır; multimetreyle fark görürseniz `PROBOT_BATTERY_TRIM` ile
-  ince ayar yapın.
+- The pin must be chosen from **GPIO1-10**: ADC2 pins (GPIO11-20) do not
+  work while WiFi is on. A wrong pin is caught at compile time with
+  [PB-E104].
+- 100k/22k brings the 12.6 V peak of a 3S LiPo down to 2.27 V (the linear
+  region of the ADC). Put a 100nF capacitor on the midpoint, and connect the
+  divider **after the main switch** so it does not drain the battery
+  (~0.1 mA) while the robot is off.
+- The reading is eFuse-calibrated and uses an 8-sample average plus
+  smoothing, giving roughly 1-2% accuracy; if you see a difference against a
+  multimeter, fine-tune with `PROBOT_BATTERY_TRIM`.
 
-**2) INA219 / INA226 I2C sensörü** — daha hassas, lehim istemez:
+**2) INA219 / INA226 I2C sensor:** more precise, no soldering.
 
 ```cpp
-#define PROBOT_BATTERY_INA       226   // ya da 219
-// opsiyonel: PROBOT_BATTERY_INA_ADDR / _SDA / _SCL
+#define PROBOT_BATTERY_INA       226   // or 219
+// optional: PROBOT_BATTERY_INA_ADDR / _SDA / _SCL
 ```
 
-Sensöre ulaşılamazsa çalışma zamanında [PB-E306] uyarısı düşer ve gösterge
-"Veri yok"a döner. INA'nın shunt'ı üzerinden anlık akım da okunur:
-`probot::io::battery::currentAmps()`.
+If the sensor cannot be reached, a [PB-E306] warning is raised at runtime
+and the gauge returns to "Veri yok". Instantaneous current is also read from
+the INA shunt: `probot::io::battery::currentAmps()`.
 
-> **INA'nın I2C bus'ını kullanıcı kodundan kullanmayın.** Kütüphane INA'yı
-> kendi görev döngüsünden okur; aynı `Wire` bus'ına robot kodunuzdan ikinci
-> bir cihaz (IMU, OLED...) bağlarsanız okumalar karışabilir. Kendi I2C
-> cihazınız varsa ya batarya için ADC yöntemini seçin ya da cihazınızı
-> `Wire1`'e (ayrı pinler) taşıyın.
+> **Do not use the INA's I2C bus from user code.** The library reads the INA
+> from its own task loop; if you attach a second device (IMU, OLED...) from
+> your robot code to the same `Wire` bus, readings can get mixed up. If you
+> have your own I2C device, either choose the ADC method for the battery or
+> move your device to `Wire1` (separate pins).
 >
-> **Shunt notu:** akım hesabı `PROBOT_BATTERY_INA_SHUNT_MOHM` (default 100)
-> ile yapılır. INA226'nın ±81.92 mV shunt aralığı 100 mΩ ile ±0.82 A'da
-> doyar — modülünüzdeki shunt değerini (örn. 2 mΩ) tanımlayın. Gerilim
-> ölçümü shunt'tan bağımsızdır.
+> **Shunt note:** current is computed with `PROBOT_BATTERY_INA_SHUNT_MOHM`
+> (default 100). The INA226's +/-81.92 mV shunt range saturates at +/-0.82 A
+> with 100 mohm, so define the shunt value of your module (for example
+> 2 mohm). Voltage measurement does not depend on the shunt.
 
-**3) Elle besleme** — kendi ölçümünüz varsa: `probot::setBatteryVoltage(v)`.
+**3) Manual feed:** if you have your own measurement:
+`probot::setBatteryVoltage(v)`.
 
-Gösterge (Dashboard) son ~8 saniyenin ortalamasını gösterir; **Logs →
-History** grafiği örnekleri ortalamasız çizer — motor yükünde gerilim
-çöküşünü (sag) oradan izleyin.
+The gauge (Dashboard) shows the average of roughly the last 8 seconds; the
+**Logs → History** chart plots samples without averaging, so watch voltage
+sag under motor load there.
 
-## Bağlantı davranışı (güvenlik)
+## Connection behavior (safety)
 
-- Joystick verisi **500 ms** kesilirse eksen/butonlar otomatik sıfırlanır
-  → motorlar son komutla kaçmaz.
-- DS **10 sn** tamamen sessiz kalırsa robot STOP'a geçer
-  (`PROBOT_DS_TIMEOUT_FORCE_STOP 0` ile yumuşak moda alınabilir).
-- Aynı anda **tek client** kontrol edebilir (ilk bağlanan IP sahip olur).
-  İkinci cihaz arayüzü açarsa `403` alır. `/health` ve `/info` ise
-  sahiplik gerektirmez — hakem/izleme cihazları serbestçe okuyabilir.
+- If joystick data stops for **500 ms**, axes and buttons are zeroed
+  automatically, so motors do not run away on the last command.
+- If the DS stays completely silent for **10 s**, the robot goes to STOP
+  (it can be put in soft mode with `PROBOT_DS_TIMEOUT_FORCE_STOP 0`).
+- Only **one client** can control at a time (the first IP to connect becomes
+  the owner). A second device opening the UI gets `403`. `/health` and
+  `/info` do not require ownership, so referee and monitoring devices can
+  read them freely.
 
-## FTC OpMode yaşam döngüsü
+## FTC OpMode lifecycle
 
-- Model FTC'deki OpMode akışıyla aynıdır: **Autonomous / TeleOp seç → INIT →
-  START → STOP**. Mod yalnız STOPPED/TRANSITION'da değiştirilebilir.
-- INIT'te ilgili `init()` bir kez, RUN'da `loop()` sürekli, INIT veya RUN'dan
-  her çıkışta ilgili `stop()` bir kez çağrılır.
-- Auto süresi `autonomousStart()` sonrasında başlar. Süre bitince
-  `autonomousStop()` çalışır, TeleOp önseçilir ve sistem TRANSITION'da yeni
-  bir INIT bekler; TeleOp otomatik başlamaz.
-- Tüm hook'lar **tek kalıcı task'ta**, yalnız döngü sınırlarında çalışır.
-  Stop/faz değişimi kullanıcı kodunu iş ortasında **kesmez** — bu yüzden
-  bir Wire/I2C ya da malloc kilidi asla orphan olmaz (eski sürümlerdeki
-  donmanın kök sebebi buydu).
-- **Kural:** her `teleopLoop`/`autonomousLoop` turu bir gün **dönmeli**
-  (öneri < ~2 sn). Blocking serbest, *sonsuz* blocking yasak. I2C/sensör
-  çağrılarına timeout koyun — örn. `Wire.begin()` sonrası
-  `Wire.setTimeOut(50);` — yoksa takılı bir cihaz turu kilitler.
-- **Stop kooperatiftir:** o anki tur dönünce aktif OpMode `stop()`u koşar (en fazla
-  bir loop periyodu gecikme). Anında kesme için acil durdurma kullanın.
-- **Stall (halt-safe):** bir tur `PROBOT_LOOP_DEADLINE_MS` (2 sn) içinde
-  dönmezse input sıfırlanır, LED kırmızı yanar, robot güvende tutulur —
-  **task öldürülmez, çip reboot edilmez** (homing/relative state korunur).
+- The model is the same as the FTC OpMode flow: **select Autonomous / TeleOp
+  → INIT → START → STOP**. The mode can only be changed in STOPPED or
+  TRANSITION.
+- On INIT the matching `init()` is called once, during RUN `loop()` is
+  called continuously, and on every exit from INIT or RUN the matching
+  `stop()` is called once.
+- The Auto timer starts after `autonomousStart()`. When it ends,
+  `autonomousStop()` runs, TeleOp is preselected, and the system waits in
+  TRANSITION for a new INIT; TeleOp does not start automatically.
+- All hooks run in **one persistent task**, only at loop boundaries.
+  A stop or phase change does not **interrupt** user code midway, so a
+  Wire/I2C or malloc lock is never orphaned (the root cause of the freezes
+  in older versions).
+- **Rule:** every `teleopLoop`/`autonomousLoop` pass must eventually
+  **return** (recommendation: under about 2 s). Blocking is allowed,
+  *infinite* blocking is not. Put timeouts on I2C/sensor calls, for example
+  `Wire.setTimeOut(50);` after `Wire.begin()`, otherwise a stuck device locks
+  the pass.
+- **Stop is cooperative:** when the current pass returns, the active
+  OpMode's `stop()` runs (at most one loop period of delay). For an
+  immediate cut, use the emergency stop.
+- **Stall (halt-safe):** if a pass does not return within
+  `PROBOT_LOOP_DEADLINE_MS` (2 s), input is zeroed, the LED turns red and
+  the robot is held safe. **The task is not killed and the chip is not
+  rebooted** (homing and relative state are preserved).
 
-### İleri seviye: initLoop ve start
+### Advanced: initLoop and start
 
-`autonomousInitLoop()` / `teleopInitLoop()` INIT ile START arasında robot
-kımıldamadan tekrar çağrılır; input nötr ve RSL sabit kalır. Kamera ile saha
-randomizasyonu okumak, gyro/sensör kalibrasyon durumunu yayınlamak veya maç
-öncesi kontrol yapmak içindir. Stall deadline'ı burada da geçerlidir.
+`autonomousInitLoop()` / `teleopInitLoop()` are called repeatedly between
+INIT and START while the robot stays still; input is neutral and the RSL
+stays solid. They are for reading field randomization with a camera,
+publishing gyro/sensor calibration status, or running pre-match checks. The
+stall deadline applies here too.
 
-`autonomousStart()` / `teleopStart()` START anındaki bir kerelik zaman damgası
-ve state reset işleri içindir. Çoğu robotta loop'un ilk turu yeterlidir; bu
-yüzden ana örneklerde bu ileri seviye hook'lar kullanılmaz.
+`autonomousStart()` / `teleopStart()` are for one-time timestamps and state
+resets at the moment of START. On most robots the first pass of the loop is
+enough, which is why the main examples do not use these advanced hooks.
 
-## Acil durdurma
+## Emergency stop
 
-- Arayüzdeki kırmızı **EMERGENCY STOP** butonu (ya da
-  `/robotControl?cmd=estop`) kullanıcı task'ını öldürür, INIT/RUN'daki aktif
-  OpMode `stop()`unu taze task'ta watchdog'lu çalıştırır ve robotu **reboot'a
-  kadar kilitler** (STOPPED/TRANSITION'da hook yok; Init/Start
-  reddedilir; "Reboot" butonu ya da güç döngüsü temizler). Donmuş bir
-  loop'u bile durdurur.
-- Gerçek güvenlik garantisi için **donanım E-stop**'unu güç/enable hattına
-  koyun: çip tamamen kilitlense bile çalışan tek katman odur. Kütüphanenin
-  `PROBOT_ESTOP_ENABLE_PIN`'ini motor sürücülerinin enable hattına
-  bağlarsanız acil durdurma o hattı da donanımda keser.
+- The red **EMERGENCY STOP** button in the UI (or
+  `/robotControl?cmd=estop`) kills the user task, runs the active OpMode's
+  `stop()` (if in INIT/RUN) in a fresh task under a watchdog, and **latches
+  the robot until reboot** (there is no hook in STOPPED/TRANSITION; Init and
+  Start are rejected; the "Reboot" button or a power cycle clears it). It
+  stops even a frozen loop.
+- For a real safety guarantee, put a **hardware E-stop** on the
+  power/enable line: it is the only layer that works even if the chip locks
+  up completely. If you wire the library's `PROBOT_ESTOP_ENABLE_PIN` to the
+  motor drivers' enable line, emergency stop also cuts that line in
+  hardware.
 
-## Yapay zeka ile kod yazma
+## Writing code with AI
 
-Gemini / ChatGPT / Claude'a robot kodu yazdırırken bu satırları
-prompt'unuzun başına ekleyin:
+When you ask Gemini / ChatGPT / Claude to write robot code, add these lines
+at the start of your prompt:
 
 ```text
-ESP32 için "probot" kütüphanesiyle (0.4.0) Arduino kodu yaz.
-Önce API referansını oku:
+Write Arduino code for ESP32 with the "probot" library (0.4.0).
+First read the API reference:
 https://raw.githubusercontent.com/probot-studio/probot-core/stable/API.md
-Kurallar:
-- setup()/loop() TANIMLAMA. autonomousInit/Loop/Stop ve
-  teleopInit/Loop/Stop üçlülerini kullan; iki loop ve iki stop zorunlu.
+Rules:
+- Do NOT define setup()/loop(). Use the autonomousInit/Loop/Stop and
+  teleopInit/Loop/Stop triples; two loops and two stops are required.
 - Joystick: auto js = probot::io::joystick_api::makeDefault();
-  js.getLeftY() vb. (-1..+1). probot::io::gamepad() üzerinde getLeftX gibi
-  metodlar YOKTUR.
-- Servo için ham LEDC kullan: ilgili init'te ledcAttachChannel(pin,50,14,7)
-  (yüksek kanal → motor analogWrite'ıyla çakışmaz), teleopLoop'ta ledcWrite.
-- teleopLoop ~50 Hz çağrılır; içinde sonsuz döngü/uzun blocking yapma.
+  js.getLeftY() etc. (-1..+1). Methods such as getLeftX do NOT exist on
+  probot::io::gamepad().
+- For servos use raw LEDC: ledcAttachChannel(pin,50,14,7) in the relevant
+  init (high channel, so it does not collide with motor analogWrite), and
+  ledcWrite in teleopLoop.
+- teleopLoop is called at ~50 Hz; do not write infinite loops or long
+  blocking calls in it.
 ```
 
-Makine-okur özet: [`llms.txt`](llms.txt) · Tam referans: [`API.md`](API.md)
+Machine-readable summary: [`llms.txt`](llms.txt) · Full reference: [`API.md`](API.md)
 
-## Sık sorunlar
+## Troubleshooting
 
-| Belirti | Çözüm |
+| Symptom | Fix |
 |---|---|
 | "Sketch too big" | Partition Scheme → Huge APP (3MB No OTA) |
-| `#error ... [PB-E101/E02]` | Makroları `#include <probot.h>`'den önce yazın — [detay](https://probotstudio.com/docs/hatalar/#pb-e101) |
-| Arayüz açılmıyor / 403 | Başka bir cihaz bağlı (tek client kuralı). Diğerini kapatın, ~5 sn bekleyin |
-| Joystick görünmüyor | Kumandada herhangi bir tuşa basın (tarayıcı gamepad'i tuşa basılınca tanır) |
-| Kumandam yok | Joystick sekmesi → **Klavye** (bilgisayarda) ya da **Dokunmatik** (telefonda) kaynağını elle etkinleştirin — otomatik seçilmez |
-| Sık kopma | Kanal çakışması — robotlara **farklı sabit kanallar** verin (varsayılanlar: 1/6/11) |
-| `undefined reference to teleopLoop` | Zorunlu hook eksik [PB-E201] — dördünü de tanımlayın (boş olabilir) |
-| Kırmızı yanıp sönen LED, robot tepkisiz | Deadline miss [PB-E301] — loop 2 sn dönmedi; [detay](https://probotstudio.com/docs/hatalar/#pb-e301) |
-| Servo titriyor | Yukarıdaki "Servo kullanımı" bölümü |
+| `#error ... [PB-E101/E02]` | Write the macros before `#include <probot.h>`: [details](https://probotstudio.com/docs/hatalar/#pb-e101) |
+| UI does not open / 403 | Another device is connected (single-client rule). Close it and wait ~5 s |
+| Joystick not visible | Press any button on the gamepad (browsers only detect a gamepad after a button press) |
+| No gamepad | In the Joystick tab, manually enable the **Keyboard** (on a computer) or **Touch** (on a phone) source; it is not selected automatically |
+| Frequent disconnects | Channel conflict: give robots **different fixed channels** (defaults: 1/6/11) |
+| `undefined reference to teleopLoop` | A mandatory hook is missing [PB-E201]: define all four (they may be empty) |
+| Blinking red LED, robot unresponsive | Deadline miss [PB-E301]: the loop did not return for 2 s; [details](https://probotstudio.com/docs/hatalar/#pb-e301) |
+| Servo jitters | See "Servo usage" above |
 
-## Destek ve lisans
+## Development and testing
 
-- Hata bildirimi: https://github.com/probot-studio/probot-core/issues
-- WhatsApp: +90 538 040 81 48
-- Katkı: [CONTRIBUTING.md](CONTRIBUTING.md) · Davranış kuralları:
-  [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
-- Lisans: MIT + Commons Clause ([LICENSE](LICENSE) ·
-  [LICENSE-commercial](LICENSE-commercial)) — eğitim ve yarışma kullanımı
-  ücretsiz, ticari lisans için tunagul54@gmail.com
+Prerequisites: `arduino-cli` (or Arduino IDE 2.x), the Arduino-ESP32 core,
+and the Adafruit NeoPixel library (`make libs`).
 
----
+```bash
+make list                                  # list the examples
+make build EXAMPLE=JoystickTest            # build one example (or EXAMPLE=all)
+make upload EXAMPLE=JoystickTest PORT=/dev/ttyACM0
+make serial                                # serial monitor, 115200 baud
+make tests/control_tests && ./tests/control_tests   # host unit tests, no hardware
+```
 
-# Probot (EN)
+`make build` first runs `tools/sync_version.py`, which propagates the
+`VERSION` file into the metadata files and doc headers. See
+[CLAUDE.md](CLAUDE.md) for the full engineering guide (architecture, release
+process, rules for changes).
 
-ESP32 communication library for educational robotics competitions:
-the robot hosts a WiFi AP and a browser-based driver station; joystick
-input streams over a binary WebSocket at 50 Hz with automatic failsafes
-(input zeroing after 500 ms, robot stop after 10 s of DS silence).
+## Contributing
 
-**Install:** Arduino IDE Library Manager → "probot", or clone
-https://github.com/probot-studio/probot-core into `~/Arduino/libraries/`.
-Requires arduino-esp32 core 3.x and the **Huge APP (3MB No OTA)**
-partition scheme.
+Contributions are welcome. Open pull requests against the `dev` branch;
+`stable` is the release branch. Read [CONTRIBUTING.md](CONTRIBUTING.md) and
+[CLAUDE.md](CLAUDE.md), and follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-**Minimal sketch:** see the Turkish quick start above — the code is
-identical. Define the three `PROBOT_WIFI_*` macros, include `probot.h`,
-implement the FTC-style `autonomousInit/Loop/Stop` and
-`teleopInit/Loop/Stop` hooks (both loop and stop hooks are required), and
-read input via `probot::io::joystick_api::makeDefault()`. Do not define
-`setup()`/`loop()` — the library owns them.
+## Support and license
 
-Docs site: [probotstudio.com/docs](https://probotstudio.com/docs) · Full API
-reference: [API.md](API.md) · Machine-readable index:
-[llms.txt](llms.txt) · Changes: [CHANGELOG.md](CHANGELOG.md) ·
-Contributing: [CONTRIBUTING.md](CONTRIBUTING.md) · License: MIT +
-Commons Clause ([LICENSE](LICENSE) · [LICENSE-commercial](LICENSE-commercial))
+- Bug reports: https://github.com/probot-studio/probot-core/issues
+- Docs: [probotstudio.com/docs](https://probotstudio.com/docs)
+- License: MIT + Commons Clause ([LICENSE](LICENSE) ·
+  [LICENSE-commercial](LICENSE-commercial)). Educational and competition use
+  is free; for a commercial license, contact tunagul54@gmail.com.
