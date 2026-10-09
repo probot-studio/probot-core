@@ -304,9 +304,12 @@ Write production-grade code that a staff engineer would approve without comments
   `refactor/...`, `chore/...`, `docs/...`, `test/...`, `ci/...`.
 - Commits follow Conventional Commits, fully in English: `type(scope): imperative summary`,
   then a body that explains why. Agent commits carry a `Co-Authored-By:` trailer.
-- Every change lands through a PR into the trunk. Squash merge only; the branch is deleted
-  after merge. Promoting the trunk to a release branch (`stable`, `prod`) is a fast-forward
-  or a merge commit, never a squash, so both branches keep the same commits.
+- Every change lands through a PR into the trunk. Rebase merge only: history stays linear and
+  every commit of the PR lands as written, so the branch history is part of the review. Before
+  merging, each commit builds and passes the tests on its own and has a Conventional Commits
+  subject; fixups are folded in (`git commit --fixup <sha>`, then `git rebase --autosquash`).
+  The branch is deleted after merge. Promoting the trunk to a release branch (`stable`, `prod`)
+  is a fast-forward or a merge commit, never a squash, so both branches keep the same commits.
 - **Never merge while CI is red or still running.** Wait for every required check to finish
   green, including after a rebase.
 - No direct pushes, force pushes or history rewrites on shared branches (`dev`, `main`, `prod`,
