@@ -69,18 +69,18 @@ void teleopStop() {
 uint32_t autoStartTime = 0;
 
 void autonomousInit() {
-  // INIT evresinde robot KIMILDAMAZ — burada yalnız hazırlık yapılır.
-  // Hareket START sonrası autonomousLoop'ta başlar.
+  // The robot must not move during INIT: only preparation happens here.
   initDrive();
-  autoStartTime = 0;
+}
+
+void autonomousStart() {
+  // Runs once at START: take the timestamp and start driving.
+  autoStartTime = millis();
+  setMotor(LEFT_RPWM,  LEFT_LPWM,  0.4f, LEFT_INVERTED);
+  setMotor(RIGHT_RPWM, RIGHT_LPWM, 0.4f, RIGHT_INVERTED);
 }
 
 void autonomousLoop() {
-  if (autoStartTime == 0) {              // ilk tur = START anı
-    autoStartTime = millis();
-    setMotor(LEFT_RPWM,  LEFT_LPWM,  0.4f, LEFT_INVERTED);
-    setMotor(RIGHT_RPWM, RIGHT_LPWM, 0.4f, RIGHT_INVERTED);
-  }
   if (millis() - autoStartTime >= 2000) {
     stopMotors();
   }
