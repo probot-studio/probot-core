@@ -23,6 +23,14 @@ void teleopStart() __attribute__((weak));
 void teleopLoop();
 void teleopStop();
 
+// [PB-E106] "redefinition of `void robotInit()`" / "robotEnd()": these 0.3.x
+//   hooks were removed in 0.4.0 and would silently never run. They are deleted
+//   so an old sketch fails to compile. Move the code: setup into
+//   teleopInit()/autonomousInit(), safe stop into teleopStop()/autonomousStop().
+//   Docs: probotstudio.com/docs/hatalar/#pb-e106
+void robotInit() = delete; // [PB-E106] removed in 0.4.0: move this code into teleopInit()/autonomousInit()
+void robotEnd() = delete;  // [PB-E106] removed in 0.4.0: move this code into teleopStop()/autonomousStop()
+
 // Core runtime
 #include <probot/core/core_config.hpp>
 #include <probot/core/wdt.hpp>

@@ -20,6 +20,8 @@ _(boş — 0.4.0 sonrası değişiklikler buraya)_
   Yerlerine Autonomous ve TeleOp için ayrı `init`, `initLoop`, `start`,
   `loop`, `stop` hook'ları geldi. `loop`/`stop` zorunlu; diğerleri weak —
   tanımlanmazsa çalışma anında boş sayılır.
+  A sketch that still defines `robotInit()` or `robotEnd()` now fails to
+  compile with PB-E106 instead of building and silently never calling them.
 - **INIT ve START ayrıştı.** INIT ilgili `init()`i bir kez ve `initLoop()`u
   sürekli çalıştırır; robot input'u nötr ve RSL sabit kalır. START ilgili
   `start()`ı bir kez çalıştırıp RUN döngüsüne girer.

@@ -366,6 +366,7 @@ Machine-readable summary: [`llms.txt`](llms.txt) · Full reference: [`API.md`](A
 |---|---|
 | "Sketch too big" | Partition Scheme → Huge APP (3MB No OTA) |
 | `#error ... [PB-E101/E02]` | Write the macros before `#include <probot.h>`: [details](https://probotstudio.com/docs/hatalar/#pb-e101) |
+| `redefinition of 'void robotInit()'` [PB-E106] | 0.3.x hooks were removed: move the code into `teleopInit()`/`autonomousInit()` and `teleopStop()`/`autonomousStop()`; [details](https://probotstudio.com/docs/hatalar/#pb-e106) |
 | UI does not open / 403 | Another device is connected (single-client rule). Close it and wait ~5 s |
 | Joystick not visible | Press any button on the gamepad (browsers only detect a gamepad after a button press) |
 | No gamepad | In the Joystick tab, manually enable the **Keyboard** (on a computer) or **Touch** (on a phone) source; it is not selected automatically |
