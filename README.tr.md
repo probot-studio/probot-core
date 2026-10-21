@@ -313,6 +313,7 @@ Makine-okur özet: [`llms.txt`](llms.txt) · Tam referans: [`API.md`](API.md)
 |---|---|
 | "Sketch too big" | Partition Scheme → Huge APP (3MB No OTA) |
 | `#error ... [PB-E101/E02]` | Makroları `#include <probot.h>`'den önce yazın — [detay](https://probotstudio.com/docs/hatalar/#pb-e101) |
+| `redefinition of 'void robotInit()'` [PB-E106] | 0.3.x hook'ları kaldırıldı: kodu `teleopInit()`/`autonomousInit()` ve `teleopStop()`/`autonomousStop()`'a taşıyın; [detay](https://probotstudio.com/docs/hatalar/#pb-e106) |
 | Arayüz açılmıyor / 403 | Başka bir cihaz bağlı (tek client kuralı). Diğerini kapatın, ~5 sn bekleyin |
 | Joystick görünmüyor | Kumandada herhangi bir tuşa basın (tarayıcı gamepad'i tuşa basılınca tanır) |
 | Kumandam yok | Joystick sekmesi → **Klavye** (bilgisayarda) ya da **Dokunmatik** (telefonda) kaynağını elle etkinleştirin — otomatik seçilmez |
