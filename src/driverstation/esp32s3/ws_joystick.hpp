@@ -4,6 +4,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <probot/io/gamepad.hpp>
+#include <probot/core/lifecycle.hpp>
 #include <probot/robot/state.hpp>
 
 namespace probot::driverstation::esp32 {
@@ -257,12 +258,7 @@ namespace probot::driverstation::esp32 {
       }
 
       uint32_t now = millis();
-      auto state = probot::robot::state().read();
-      bool runPhase = state.phase == probot::robot::Phase::AUTO_RUN ||
-                      state.phase == probot::robot::Phase::TELEOP_RUN;
-      bool running = runPhase && state.status == probot::robot::Status::START &&
-                     !state.deadlineMiss;
-      if (running) _gs.write(now, axes, nA, buttons, nB);
+      if (probot::core::inputsEnabled(probot::robot::state().read())) _gs.write(now, axes, nA, buttons, nB);
       else _gs.write(now, nullptr, 0, nullptr, 0); // INIT/disabled stays neutral
       __atomic_store_n(&probot::robot::g_ds_last_activity_ms, now, __ATOMIC_SEQ_CST);
     }

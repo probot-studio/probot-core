@@ -730,12 +730,7 @@ namespace probot::driverstation::esp32 {
       parseFloatArray(body, "axes", axes, 20, nA);
       parseBoolArray(body, "buttons", buttons, 20, nB);
       uint32_t now = millis();
-      auto state = ds->_rs.read();
-      bool runPhase = state.phase == robot::Phase::AUTO_RUN ||
-                      state.phase == robot::Phase::TELEOP_RUN;
-      bool running = runPhase && state.status == robot::Status::START &&
-                     !state.deadlineMiss;
-      if (running) ds->_gs.write(now, axes, nA, buttons, nB);
+      if (core::inputsEnabled(ds->_rs.read())) ds->_gs.write(now, axes, nA, buttons, nB);
       else ds->_gs.write(now, nullptr, 0, nullptr, 0);
 
       httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
