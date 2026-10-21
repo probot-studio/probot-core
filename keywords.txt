@@ -34,6 +34,9 @@ setOpModeOptions	KEYWORD2
 selectedOpModeId	KEYWORD2
 activeOpModeId	KEYWORD2
 utilityAvailable	KEYWORD2
+setLoopPeriodMs	KEYWORD2
+loopPeriodMs	KEYWORD2
+loopOverruns	KEYWORD2
 makeDefault	KEYWORD2
 getLeftX	KEYWORD2
 getLeftY	KEYWORD2

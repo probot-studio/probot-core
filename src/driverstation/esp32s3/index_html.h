@@ -563,6 +563,7 @@ const char MAIN_page[] PROGMEM = R"=====(
     .kv .v{font:700 0.92rem var(--mono);color:var(--ink);font-variant-numeric:tabular-nums;word-break:break-all;}
     .kv .v.good{color:var(--green);}
     .kv .v.bad{color:var(--stop);}
+    .kv .v.warn{color:var(--amber);}
     .ch-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:5px;}
     .ch-row select{flex:1;min-width:0;}
     .hint{font-size:0.7rem;color:var(--muted);font-weight:600;}
@@ -958,6 +959,7 @@ const char MAIN_page[] PROGMEM = R"=====(
               <div class="kv"><span class="k">Deadline Miss</span><span class="v" id="dbgDm">--</span></div>
               <div class="kv"><span class="k">Joystick Age</span><span class="v" id="dbgJoyAge">--</span></div>
               <div class="kv"><span class="k">Clients</span><span class="v" id="dbgSta">--</span></div>
+              <div class="kv"><span class="k">Loop</span><span class="v" id="dbgLoop">--</span></div>
               <div class="kv" style="grid-column:1/-1;"><span class="k">Last Disconnect</span><span class="v" id="dbgDisc">--</span></div>
             </div>
           </div>
@@ -1547,6 +1549,7 @@ const char MAIN_page[] PROGMEM = R"=====(
   var lastJoyAge=-1;
   var lastSta=0;
   var lastDisc=0;
+  var lastLoopMs=0,lastOverruns=-1,ovrLogged=-1,ovrLogAt=-1e9;
   var lastBatt=0;
   var healthFailCount=0;
   var infoTotalHeap=0;
@@ -1563,6 +1566,15 @@ const char MAIN_page[] PROGMEM = R"=====(
     if(db) db.hidden=!lastDm;
     if(typeof data.joyAgeMs==='number') lastJoyAge=data.joyAgeMs;
     if(typeof data.sta==='number') lastSta=data.sta;
+    if(typeof data.loopMs==='number') lastLoopMs=data.loopMs;
+    if(typeof data.overruns==='number'){
+      lastOverruns=data.overruns;
+      if(ovrLogged<0||lastOverruns<ovrLogged) ovrLogged=lastOverruns; /* first sample or robot rebooted */
+      else if(lastOverruns>ovrLogged&&performance.now()-ovrLogAt>10000){
+        evlog('warn','Loop periyodu '+(lastOverruns-ovrLogged)+' kez aşıldı');
+        ovrLogged=lastOverruns;ovrLogAt=performance.now();
+      }
+    }
     if(typeof data.disc==='number'&&data.disc!==lastDisc){
       lastDisc=data.disc;
       evlog('warn','Client koptu — IEEE reason '+lastDisc);
@@ -1724,6 +1736,9 @@ const char MAIN_page[] PROGMEM = R"=====(
     dm.className='v '+(lastDm?'bad':'good');
     $id('dbgJoyAge').textContent=(lastJoyAge>=0)?(lastJoyAge+' ms'):'--';
     $id('dbgSta').textContent=String(lastSta);
+    var lp=$id('dbgLoop');
+    lp.textContent=lastLoopMs?lastLoopMs+' ms, '+Math.max(0,lastOverruns)+' overrun':'--';
+    lp.className='v'+(lastOverruns>0?' warn':'');
     $id('dbgDisc').textContent=lastDisc?('reason '+lastDisc):'--';
   }
 

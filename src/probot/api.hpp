@@ -10,6 +10,7 @@
 #include <probot/version.hpp>
 #include <probot/robot/state.hpp>
 #include <probot/core/lifecycle.hpp>
+#include <probot/core/loop_timing.hpp>
 #include <probot/io/gamepad.hpp>
 #include <probot/io/joystick_api.hpp>
 #include <probot/telemetry/telemetry.hpp>

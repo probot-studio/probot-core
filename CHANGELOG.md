@@ -8,6 +8,16 @@ Biçim [Keep a Changelog](https://keepachangelog.com/), sürümler
 
 ## [Unreleased]
 
+### Breaking
+- `initLoop`/`loop` run at a fixed rate: passes start on a fixed schedule
+  one period apart, so the hook's own run time no longer stretches the
+  period (it used to sleep a full period after the work). An overrun does
+  not trigger catch-up passes. Remove `delay()` calls from loops: they
+  now add to the pass time (a `delay(20)` at the default 20 ms period
+  makes nearly every pass an overrun). The examples no longer use them.
+- `USER_LOOP_PERIOD_MS` must be 1-1000; `0` (run as fast as possible) and
+  larger values used to compile and now fail with PB-E109.
+
 ### Added
 - `probot::framework::install()`: a framework layer runs `boot`,
   `preCycle` and `postCycle` on the user task in every phase, and
@@ -53,6 +63,13 @@ Biçim [Keep a Changelog](https://keepachangelog.com/), sürümler
   unknown phases as not running. A sketch that already has its own
   function named `utilityInit`, `utilityLoop` etc. now gets it called as a
   hook; rename it.
+- `probot::setLoopPeriodMs()`, `loopPeriodMs()` and `loopOverruns()`:
+  the user loop period can change at runtime (1-1000 ms, 0 restores
+  `USER_LOOP_PERIOD_MS`), and passes that end after their deadline are
+  counted (passes that ran a one-shot `init`/`start`/`stop` are not).
+  `/health` and the `'S'` frame gain `loopMs` and `overruns`; the Driver
+  Station shows them on the Logs page. `USER_LOOP_PERIOD_MS` outside 1-1000
+  fails the build with PB-E109.
 
 ### Changed
 - `probot::emergencyStop()` moved to `robot/state.hpp` and

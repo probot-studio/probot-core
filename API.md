@@ -278,6 +278,26 @@ void autonomousInit() {
   sırada değiştiyse düzeltme bir sonraki INIT'te yapılır. Utility seçiliyken
   Utility artık sunulmuyorsa seçim TeleOp'a geçer.
 
+### Loop periyodu
+
+`initLoop`/`loop` hook'ları sabit hızda çağrılır: turlar periyot aralıklı
+sabit bir takvimde başlar ve hook'un süresi periyoda dahildir; geç uyanan
+bir tur sonrakilerin planlı başlangıcını kaydırmaz.
+
+| Fonksiyon | Açıklama |
+|---|---|
+| `probot::setLoopPeriodMs(ms)` | Periyodu 1-1000 ms yapar, bir sonraki turdan geçerli; `0` `USER_LOOP_PERIOD_MS`'e döner. Aralık dışında `false` |
+| `probot::loopPeriodMs()` | Geçerli periyot (ms) |
+| `probot::loopOverruns()` | Açılıştan beri periyodunu aşan tur sayısı. `init`/`start`/`stop` çalıştıran turlar sayılmaz (onların süresi `PROBOT_HOOK_DEADLINE_MS`) |
+
+Periyodunu aşan bir turdan sonra kaçırılan turlar art arda çalıştırılmaz;
+takvim kısa bir beklemeden sonra yeniden başlar. Uyku süresi
+`PROBOT_LOOP_DEADLINE_MS`'e sayılmaz, uzun bir periyot stall sayılmaz.
+`/health` ve `'S'` çerçevesi `loopMs` ve `overruns` alanlarını taşır; DS
+bunları Logs sayfasındaki Network Status kartında gösterir. Loop içinde
+`delay()` kullanmayın: kütüphane turları zaten periyoda göre bekletir,
+`delay()` tur süresine eklenir ve periyodu geçen tur aşım sayılır.
+
 ## Framework katmanı (ileri seviye)
 
 Kendi döngüsünü süren bir katman (ör. robot framework SDK'sı) user task'ta
@@ -396,7 +416,7 @@ Yaşam döngüsü / güvenlik makroları:
 | `PROBOT_WDT_TIMEOUT_S` | 8 | Donanım watchdog (yalnız sysloop abone; > loop deadline olmalı) |
 | `PROBOT_ESTOP_END_MS` | 500 | Acil durdurmada aktif `stop()` hook'una tanınan süre; aşılırsa reboot |
 | `PROBOT_ESTOP_ENABLE_PIN` | -1 | Kütüphanenin sürdüğü enable GPIO'su (-1 = kapalı). Boot'ta HIGH, estop'ta LOW |
-| `USER_LOOP_PERIOD_MS` | 20 | Loop çağrı periyodu (~50 Hz) |
+| `USER_LOOP_PERIOD_MS` | 20 | Loop çağrı periyodu (~50 Hz), sabit hızlı; 1-1000 (PB-E109). Çalışırken `probot::setLoopPeriodMs()` |
 | `PROBOT_USER_STACK` | 8192 | User task stack'i, bayt (en az 4096, PB-E107) |
 | `PROBOT_FRAMEWORK` | tanımsız | Tanımlıysa OpMode hook'larının hepsi isteğe bağlı (framework katmanı için) |
 | `PROBOT_DASH_MAX_TOPICS` | 128 | Dashboard topic sayısı (1-255, PB-E108) |
@@ -424,6 +444,7 @@ zamanı · **E4xx** protokol/HTTP (E409, HTTP 409'un karşılığıdır).
 | PB-E106 | Derleme | `redefinition of void robotInit()` / `robotEnd()`: 0.3.x hook'ları 0.4.0'da kaldırıldı; kurulum kodunu `teleopInit()`/`autonomousInit()`'e, güvenli durdurmayı `teleopStop()`/`autonomousStop()`'a taşıyın |
 | PB-E107 | Derleme | `PROBOT_USER_STACK` 4096 bayttan küçük |
 | PB-E108 | Derleme | Dashboard sınırı geçersiz: `PROBOT_DASH_MAX_TOPICS` 1-255, `PROBOT_DASH_MAX_SCHEMAS` 0-255, `PROBOT_DASH_MAX_VALUE` 16-16384, `PROBOT_DASH_PERIOD_MS` 10-250 dışında |
+| PB-E109 | Derleme | `USER_LOOP_PERIOD_MS` 1-1000 ms dışında |
 | PB-E201 | Bağlama | Zorunlu hook tanımsız — `undefined reference to teleopLoop()` vb. Dördü de (boş olsa bile) tanımlanmalı |
 | PB-E202 | Bağlama | `setup()`/`loop()` sketch'te tanımlanmış — kütüphaneye aittir, hook'ları kullanın |
 | PB-E301 | Çalışma | Deadline miss / stall: bir `initLoop`/`loop` turu `PROBOT_LOOP_DEADLINE_MS`'i (ya da tek seferlik `init`/`start`/`stop` hook'u `PROBOT_HOOK_DEADLINE_MS`'i) aştı; girişler sıfır, halt-safe |
@@ -480,7 +501,7 @@ yazacaksanız:
 | `/getState` | GET | gerekli | `{"status":N,"phase":N,"selectedMode":"auto|teleop|utility","autoPeriodSeconds":N,"autoRemainingMs":N,"batt":V.V,"estop":b,"opMode":"N","omv":N,"util":b}` (WS yokken fallback). `opMode`: seçili OpMode seçeneği (`"0"` = yok), `omv`: OpMode listesinin sürüm sayacı, `util`: Utility seçilebilir. `batt`: pil gerilimi (bölücü/INA otomatik ya da `setBatteryVoltage()` elle), `0.0` = veri yok |
 | `/telemetry` | GET | gerekli | Telemetri tamponunun içeriği (text) (WS yokken fallback) |
 | `/getBattery` | GET | serbest | Pil gerilimi (kaynak: `PROBOT_BATTERY_ADC_PIN` bölücü, `PROBOT_BATTERY_INA` sensörü ya da elle `probot::setBatteryVoltage()`) |
-| `/health` | GET | serbest | `{"rssi":N,"up":ms,"heap":N,"dm":b,"joyAgeMs":N,"sta":N,"disc":N,"dashTopics":N,"dashBytes":N,"dashDropped":N}`: izleme/hakem için. `joyAgeMs`: son joystick paketinin yaşı (-1 = hiç gelmedi), `sta`: bağlı istemci sayısı, `disc`: son kopuşun IEEE reason kodu, `dash*`: dashboard topic sayısı, kullanılan bayt, düşürülen yazma/değer |
+| `/health` | GET | serbest | `{"rssi":N,"up":ms,"heap":N,"dm":b,"joyAgeMs":N,"sta":N,"disc":N,"dashTopics":N,"dashBytes":N,"dashDropped":N,"loopMs":N,"overruns":N}`: izleme/hakem için. `joyAgeMs`: son joystick paketinin yaşı (-1 = hiç gelmedi), `sta`: bağlı istemci sayısı, `disc`: son kopuşun IEEE reason kodu, `dash*`: dashboard topic sayısı, kullanılan bayt, düşürülen yazma/değer, `loopMs`: loop periyodu, `overruns`: periyodunu aşan tur sayısı |
 | `/info` | GET | serbest | SSID, kanal + `chSource` (macro/nvs/auto), IP, çip/heap/flash |
 | `/portal` | GET | serbest | Captive portal karşılama sayfası (`PROBOT_CAPTIVE_PORTAL 0` ile kapatılır) |
 

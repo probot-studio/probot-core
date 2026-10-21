@@ -452,7 +452,7 @@ namespace probot::driverstation::esp32 {
         "{\"status\":%u,\"phase\":%u,\"selectedMode\":\"%s\",\"autoPeriodSeconds\":%d,"
         "\"autoRemainingMs\":%u,\"batt\":%u.%u,\"rssi\":%d,\"up\":%lu,\"heap\":%lu,\"dm\":%s,"
         "\"estop\":%s,\"joyAgeMs\":%ld,\"sta\":%ld,\"disc\":%u,\"dashMax\":%lu,"
-        "\"opMode\":\"%llu\",\"omv\":%lu,\"util\":%s}",
+        "\"opMode\":\"%llu\",\"omv\":%lu,\"util\":%s,\"loopMs\":%lu,\"overruns\":%lu}",
         static_cast<unsigned>(s.status),
         static_cast<unsigned>(s.phase),
         opModeName(s.selectedMode),
@@ -470,7 +470,9 @@ namespace probot::driverstation::esp32 {
         (unsigned long)probot::dashboard::detail::maxValue(),
         (unsigned long long)s.opModeId,
         (unsigned long)robot::opModes().version(),
-        ds::utilityAvailable() ? "true" : "false");
+        ds::utilityAvailable() ? "true" : "false",
+        (unsigned long)probot::loopPeriodMs(),
+        (unsigned long)probot::loopOverruns());
       if (n < 0) return 0;
       return ((size_t)n >= out_size) ? out_size - 1 : (size_t)n;
     }
@@ -1040,7 +1042,8 @@ namespace probot::driverstation::esp32 {
       snprintf(buf, sizeof(buf),
         "{\"rssi\":%d,\"up\":%lu,\"heap\":%lu,\"dm\":%s,"
         "\"joyAgeMs\":%ld,\"sta\":%ld,\"disc\":%u,"
-        "\"dashTopics\":%u,\"dashBytes\":%lu,\"dashDropped\":%lu}",
+        "\"dashTopics\":%u,\"dashBytes\":%lu,\"dashDropped\":%lu,"
+        "\"loopMs\":%lu,\"overruns\":%lu}",
         (int)readApRssi(),
         (unsigned long)now,
         (unsigned long)ESP.getFreeHeap(),
@@ -1050,7 +1053,9 @@ namespace probot::driverstation::esp32 {
         (unsigned)diag::g_last_disc_reason,
         (unsigned)dash.topics,
         (unsigned long)dash.bytesUsed,
-        (unsigned long)dash.dropped);
+        (unsigned long)dash.dropped,
+        (unsigned long)probot::loopPeriodMs(),
+        (unsigned long)probot::loopOverruns());
 
       httpd_resp_set_type(req, "application/json");
       httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
