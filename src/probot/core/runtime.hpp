@@ -15,13 +15,7 @@
 #define PROBOT_DS_TIMEOUT_FORCE_STOP 1
 #endif
 
-// A single initLoop/loop iteration that has not returned within this many ms
-// is treated as STALLED: inputs are zeroed and the robot is held safe
-// (no kill, no reboot — see the design notes below). Must stay below the
-// hardware watchdog timeout.
-#ifndef PROBOT_LOOP_DEADLINE_MS
-#define PROBOT_LOOP_DEADLINE_MS 2000
-#endif
+// PROBOT_LOOP_DEADLINE_MS / PROBOT_HOOK_DEADLINE_MS: see lifecycle.hpp.
 
 // Hardware task watchdog timeout (seconds). Only the sysloop supervisor is
 // subscribed, so this reboots ONLY on a library/supervisor wedge — never on
