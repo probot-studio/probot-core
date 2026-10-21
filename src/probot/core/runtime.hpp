@@ -319,9 +319,6 @@ namespace probot {
           probot::driverstation::detail::g_driver_station->expireOwnerIfIdle();
           probot::driverstation::detail::g_driver_station->processDns();
         }
-#if PROBOT_BATTERY_ENABLED
-        probot::io::battery::poll(now);
-#endif
 #endif
 
         if (now - lastLed >= 500){
@@ -359,6 +356,9 @@ namespace probot {
 
 #ifdef ESP32
     probot::driverstation::start_driver_station();
+#if PROBOT_BATTERY_ENABLED
+    probot::io::battery::startTask();
+#endif
 #endif
 
     // Persistent user task (core 1) and sysloop supervisor (core 0).

@@ -39,7 +39,7 @@ _(boş — 0.4.0 sonrası değişiklikler buraya)_
 ### Eklendi
 - **Gerçek batarya ölçümü.** İki opsiyonel kaynak: gerilim bölücü + ADC1 pini
   (`PROBOT_BATTERY_ADC_PIN` + `_R_TOP_K`/`_R_BOT_K`) ya da INA219/INA226 I2C
-  sensörü (`PROBOT_BATTERY_INA 219|226`). Sysloop'ta 250 ms örnekleme, EMA
+  sensörü (`PROBOT_BATTERY_INA 219|226`). Ayrı düşük öncelikli task'ta (sysloop dışında) 250 ms örnekleme, EMA
   yumuşatma, yalnız 0.1 V değişimde yayın; INA'dan `currentAmps()` ile akım.
   Elle besleme için `probot::setBatteryVoltage(v)` sarmalayıcısı. Yeni hata
   kodları: PB-E104 (ADC pini ADC1 değil / dirençler eksik), PB-E105 (kaynak
