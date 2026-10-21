@@ -95,7 +95,7 @@ inline const MappingProfile& getActive(){
 }
 
 inline void setActive(const MappingProfile* m){
-  if (!m) return; (void)*m; // ensure not null
+  if (!m) return;
   activeMapping() = m;
 }
 
