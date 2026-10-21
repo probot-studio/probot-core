@@ -2,6 +2,23 @@
 #include <stdint.h>
 #include <probot/robot/state.hpp>
 
+// A single initLoop/loop iteration that has not returned within this many ms
+// is treated as STALLED: inputs are zeroed and the robot is held safe
+// (no kill, no reboot). Must stay below the hardware watchdog timeout.
+#ifndef PROBOT_LOOP_DEADLINE_MS
+#define PROBOT_LOOP_DEADLINE_MS 2000
+#endif
+
+// The same stall signal for one-shot init/start/stop hooks, with a longer
+// budget: they may block legitimately (e.g. sensor calibration in init()),
+// but a hook that never returns must still show up as PB-E301.
+#ifndef PROBOT_HOOK_DEADLINE_MS
+#define PROBOT_HOOK_DEADLINE_MS 10000
+#endif
+
+static_assert((PROBOT_HOOK_DEADLINE_MS) >= (PROBOT_LOOP_DEADLINE_MS),
+  "PROBOT_HOOK_DEADLINE_MS must be >= PROBOT_LOOP_DEADLINE_MS");
+
 // Cooperative FTC-style OpMode lifecycle core. This file is pure logic:
 // FreeRTOS plumbing, watchdogs and the terminal emergency stop live in
 // runtime.hpp, while host tests exercise the state machine here.
@@ -95,7 +112,7 @@ namespace probot::core {
       if (requested != cur_) transition(h, requested, rs, now, neutralize, hb, clockNow);
 
       if (cur_.stage != Stage::RUN && neutralize) neutralize();
-      uint32_t hookStartedAt = clockNow ? clockNow() : now;
+      uint32_t hookStartedAt = timeNow(now, clockNow);
       if (cur_.stage == Stage::INIT) {
         primeHeartbeat(hookStartedAt, hb);
         callInitLoop(h, cur_.mode);
@@ -109,6 +126,15 @@ namespace probot::core {
     static void primeHeartbeat(uint32_t now, volatile uint32_t* hb) {
       if (!hb) return;
       *hb = now == 0 ? 1u : now;
+    }
+    // One-shot hooks (init/start/stop) get PROBOT_HOOK_DEADLINE_MS instead
+    // of the loop deadline. The supervisor compares against the loop
+    // deadline only, so the heartbeat is stamped that much into the future.
+    static void primeOneShotHeartbeat(uint32_t now, volatile uint32_t* hb) {
+      primeHeartbeat(now + (uint32_t)(PROBOT_HOOK_DEADLINE_MS - PROBOT_LOOP_DEADLINE_MS), hb);
+    }
+    static uint32_t timeNow(uint32_t now, uint32_t (*clockNow)()) {
+      return clockNow ? clockNow() : now;
     }
 
     static void callInit(const Hooks& h, OpMode mode) {
@@ -143,7 +169,10 @@ namespace probot::core {
       if (neutralize) neutralize();
 
       if (requested.stage == Stage::STOPPED || requested.stage == Stage::TRANSITION) {
-        if (cur_.stage == Stage::INIT || cur_.stage == Stage::RUN) callStop(h, cur_.mode);
+        if (cur_.stage == Stage::INIT || cur_.stage == Stage::RUN) {
+          primeOneShotHeartbeat(timeNow(now, clockNow), hb);
+          callStop(h, cur_.mode);
+        }
         cur_ = requested;
         publish(rs, now);
         return;
@@ -154,6 +183,7 @@ namespace probot::core {
       // OpMode and settle in STOPPED; do not enter the new one in this step.
       if (requested.mode != cur_.mode &&
           (cur_.stage == Stage::INIT || cur_.stage == Stage::RUN)) {
+        primeOneShotHeartbeat(timeNow(now, clockNow), hb);
         callStop(h, cur_.mode);
         cur_ = { requested.mode, Stage::STOPPED };
         publish(rs, now);
@@ -162,9 +192,9 @@ namespace probot::core {
 
       if (requested.stage == Stage::INIT) {
         if (cur_.stage != Stage::STOPPED && cur_.stage != Stage::TRANSITION) return;
+        primeOneShotHeartbeat(timeNow(now, clockNow), hb);
         cur_ = requested;
         publish(rs, now);
-        primeHeartbeat(now, hb);
         callInit(h, cur_.mode);
         return;
       }
@@ -172,8 +202,9 @@ namespace probot::core {
       // START is valid only after INIT of the same selected OpMode.
       if (requested.stage == Stage::RUN) {
         if (cur_.stage != Stage::INIT || cur_.mode != requested.mode) return;
+        primeOneShotHeartbeat(timeNow(now, clockNow), hb);
         callStart(h, cur_.mode);
-        uint32_t enteredRunAt = clockNow ? clockNow() : now;
+        uint32_t enteredRunAt = timeNow(now, clockNow);
         if (cur_.mode == OpMode::AUTO) rs.setAutoStartMs(enteredRunAt, enteredRunAt);
         cur_ = requested;
         publish(rs, enteredRunAt);

@@ -121,6 +121,7 @@ All of them are defined **before** the `#include <probot.h>` line.
 | `PROBOT_CAPTIVE_PORTAL` | `1` | A device joining the network opens the welcome page by itself; `0` disables it |
 | `NEOPIXEL_PIN` / `NEOPIXEL_COUNT` | `3` / `1` | Status LED pin / count |
 | `PROBOT_LOOP_DEADLINE_MS` | `2000` | If an InitLoop/loop pass exceeds this, the robot is "stalled": input zeroed, held halt-safe (no kill, no reboot) |
+| `PROBOT_HOOK_DEADLINE_MS` | `10000` | The same stall limit for the one-shot init/start/stop hooks (must be >= the loop deadline) |
 | `PROBOT_WDT_TIMEOUT_S` | `8` | Hardware watchdog (sysloop only; a stuck *library* lock reboots the chip, user code does not) |
 | `PROBOT_ESTOP_ENABLE_PIN` | `-1` | Enable GPIO driven by the library (motor driver enable / contactor). HIGH at boot, LOW on emergency stop |
 | `PROBOT_ESTOP_END_MS` | `500` | Time granted to the active OpMode `stop()` on emergency stop; the chip reboots if it is exceeded |
@@ -305,7 +306,9 @@ sag under motor load there.
 - **Stall (halt-safe):** if a pass does not return within
   `PROBOT_LOOP_DEADLINE_MS` (2 s), input is zeroed, the LED turns red and
   the robot is held safe. **The task is not killed and the chip is not
-  rebooted** (homing and relative state are preserved).
+  rebooted** (homing and relative state are preserved). The one-shot `init`,
+  `start` and `stop` hooks get a longer budget, `PROBOT_HOOK_DEADLINE_MS`
+  (10 s), so sensor calibration in `init` is fine.
 
 ### Advanced: initLoop and start
 

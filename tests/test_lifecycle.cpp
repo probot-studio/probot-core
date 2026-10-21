@@ -171,6 +171,50 @@ TEST_CASE(stale_auto_start_does_not_expire_before_auto_run){
   EXPECT_TRUE(rs.read().status == robot::Status::START);
 }
 
+namespace {
+  volatile uint32_t* g_hb = nullptr;
+  std::vector<std::pair<std::string, uint32_t>> g_hb_seen;
+  void rec(const char* name) { g_hb_seen.emplace_back(name, *g_hb); }
+  void hb_init()     { rec("init"); }
+  void hb_initLoop() { rec("initLoop"); }
+  void hb_start()    { rec("start"); }
+  void hb_loop()     { rec("loop"); }
+  void hb_stop()     { rec("stop"); }
+}
+
+// One-shot hooks (init/start/stop) may legitimately block for seconds, e.g.
+// gyro calibration in init(). They get PROBOT_HOOK_DEADLINE_MS instead of
+// the loop deadline: their heartbeat is stamped into the future by the
+// difference, so the supervisor's loop-deadline check fires only after the
+// hook budget.
+TEST_CASE(stall_heartbeat_gives_one_shot_hooks_the_hook_budget){
+  g_hb_seen.clear();
+  robot::StateService rs;
+  core::PhaseMachine m;
+  core::Hooks h{ hb_init, hb_initLoop, hb_start, hb_loop, hb_stop,
+                 hb_init, hb_initLoop, hb_start, hb_loop, hb_stop };
+  volatile uint32_t hb = 500;
+  g_hb = &hb;
+
+  m.step(h, {OpMode::AUTO, Stage::INIT}, rs, 1000, nullptr, &hb);
+  m.step(h, {OpMode::AUTO, Stage::RUN}, rs, 2000, nullptr, &hb);
+  m.step(h, {OpMode::AUTO, Stage::STOPPED}, rs, 3000, nullptr, &hb);
+
+  const uint32_t grace = PROBOT_HOOK_DEADLINE_MS - PROBOT_LOOP_DEADLINE_MS;
+  const std::vector<std::pair<std::string, uint32_t>> expected{
+    {"init", 1000 + grace}, {"initLoop", 1000}, {"start", 2000 + grace},
+    {"loop", 2000}, {"stop", 3000 + grace}
+  };
+  EXPECT_TRUE(g_hb_seen == expected);
+
+  // A 3 s init() is fine; one that never returns is flagged after the budget.
+  const uint32_t initHb = 1000 + grace;
+  EXPECT_TRUE(!core::isStalled(robot::Phase::AUTO_INIT, 1000 + 3000, initHb, PROBOT_LOOP_DEADLINE_MS));
+  EXPECT_TRUE(!core::isStalled(robot::Phase::AUTO_INIT, 1000 + PROBOT_HOOK_DEADLINE_MS, initHb, PROBOT_LOOP_DEADLINE_MS));
+  EXPECT_TRUE(core::isStalled(robot::Phase::AUTO_INIT, 1000 + PROBOT_HOOK_DEADLINE_MS + 1, initHb, PROBOT_LOOP_DEADLINE_MS));
+  g_hb = nullptr;
+}
+
 TEST_CASE(stall_detection_includes_init_loop){
   using core::isStalled;
   EXPECT_TRUE(isStalled(robot::Phase::AUTO_INIT, 5000, 1000, 2000));

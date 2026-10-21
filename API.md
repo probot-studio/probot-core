@@ -66,7 +66,9 @@ TRANSITION ──INIT──▶ INIT[TELEOP]
 - **Stall (halt-safe):** bir `initLoop`/`loop` turu `PROBOT_LOOP_DEADLINE_MS` (2000)
   içinde dönmezse input sıfırlanır, LED kırmızı yanıp söner, robot
   güvende tutulur — **task öldürülmez, çip reboot edilmez** (homing
-  state'i korunur). Tur dönünce temizlenir.
+  state'i korunur). Tur dönünce temizlenir. Tek seferlik `init`/`start`/`stop`
+  hook'larının sınırı daha uzundur (`PROBOT_HOOK_DEADLINE_MS`, 10 sn); uzun
+  kalibrasyon gibi işler `init()`'te yapılabilir.
 - **Acil durdurma (`cmd=estop`):** kullanıcı task'ı öldürülür; INIT/RUN'daki
   aktif modun `stop()` hook'u taze task'ta watchdog'lu çalıştırılır. STOPPED/
   TRANSITION'da hook çağrılmaz. Robot **reboot'a kadar kilitlenir**
@@ -220,6 +222,7 @@ Yaşam döngüsü / güvenlik makroları:
 | Makro | Varsayılan | Anlamı |
 |---|---|---|
 | `PROBOT_LOOP_DEADLINE_MS` | 2000 | Bir initLoop/loop turu bu süreyi aşarsa "stalled" — input sıfır, halt-safe |
+| `PROBOT_HOOK_DEADLINE_MS` | 10000 | Tek seferlik init/start/stop hook'ları için aynı stall sınırı (loop deadline'ından küçük olamaz) |
 | `PROBOT_WDT_TIMEOUT_S` | 8 | Donanım watchdog (yalnız sysloop abone; > loop deadline olmalı) |
 | `PROBOT_ESTOP_END_MS` | 500 | Acil durdurmada aktif `stop()` hook'una tanınan süre; aşılırsa reboot |
 | `PROBOT_ESTOP_ENABLE_PIN` | -1 | Kütüphanenin sürdüğü enable GPIO'su (-1 = kapalı). Boot'ta HIGH, estop'ta LOW |
@@ -241,7 +244,7 @@ zamanı · **E4xx** protokol/HTTP (E409, HTTP 409'un karşılığıdır).
 | PB-E105 | Derleme | Batarya kaynak çakışması/geçersiz seçim — hem `PROBOT_BATTERY_ADC_PIN` hem `PROBOT_BATTERY_INA` tanımlı; ya da `_INA` 219/226 değil; ya da `_TRIM` 0.5-2.0 dışında |
 | PB-E201 | Bağlama | Zorunlu hook tanımsız — `undefined reference to teleopLoop()` vb. Dördü de (boş olsa bile) tanımlanmalı |
 | PB-E202 | Bağlama | `setup()`/`loop()` sketch'te tanımlanmış — kütüphaneye aittir, hook'ları kullanın |
-| PB-E301 | Çalışma | Deadline miss / stall — bir `initLoop`/`loop` turu `PROBOT_LOOP_DEADLINE_MS`'i aştı; girişler sıfır, halt-safe |
+| PB-E301 | Çalışma | Deadline miss / stall: bir `initLoop`/`loop` turu `PROBOT_LOOP_DEADLINE_MS`'i (ya da tek seferlik `init`/`start`/`stop` hook'u `PROBOT_HOOK_DEADLINE_MS`'i) aştı; girişler sıfır, halt-safe |
 | PB-E302 | Çalışma | Emergency stop kilitli — reboot gerekli |
 | PB-E303 | Çalışma | DS bağlantısı koptu → robot durduruldu (`PROBOT_DS_TIMEOUT_FORCE_STOP=1`) |
 | PB-E304 | Çalışma | DS bağlantısı koptu → joystick nötr, yeniden bağlanma bekleniyor (`FORCE_STOP=0`) |

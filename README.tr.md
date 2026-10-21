@@ -83,6 +83,7 @@ Hepsi `#include <probot.h>` satırından **önce** tanımlanır:
 | `PROBOT_CAPTIVE_PORTAL` | `1` | Ağa katılan cihazda karşılama sayfası kendiliğinden açılır; `0` kapatır |
 | `NEOPIXEL_PIN` / `NEOPIXEL_COUNT` | `3` / `1` | Durum LED'i pini/adedi |
 | `PROBOT_LOOP_DEADLINE_MS` | `2000` | InitLoop/loop turu bu süreyi aşarsa "stalled": input sıfır, halt-safe (öldürme/reboot yok) |
+| `PROBOT_HOOK_DEADLINE_MS` | `10000` | Tek seferlik init/start/stop hook'ları için aynı stall sınırı (loop deadline'ından küçük olamaz) |
 | `PROBOT_WDT_TIMEOUT_S` | `8` | Donanım watchdog (yalnız sysloop; bir *kütüphane* kilidi reboot ettirir, kullanıcı kodu değil) |
 | `PROBOT_ESTOP_ENABLE_PIN` | `-1` | Kütüphanenin sürdüğü enable GPIO'su (motor sürücü enable / kontaktör). Boot'ta HIGH, acil durdurmada LOW |
 | `PROBOT_ESTOP_END_MS` | `500` | Acil durdurmada aktif OpMode `stop()`una tanınan süre; aşılırsa çip reboot eder |
@@ -257,6 +258,8 @@ History** grafiği örnekleri ortalamasız çizer — motor yükünde gerilim
 - **Stall (halt-safe):** bir tur `PROBOT_LOOP_DEADLINE_MS` (2 sn) içinde
   dönmezse input sıfırlanır, LED kırmızı yanar, robot güvende tutulur —
   **task öldürülmez, çip reboot edilmez** (homing/relative state korunur).
+  Tek seferlik `init`, `start` ve `stop` hook'larının süresi daha uzundur:
+  `PROBOT_HOOK_DEADLINE_MS` (10 sn); `init`'te sensör kalibrasyonu sorun olmaz.
 
 ### İleri seviye: initLoop ve start
 
