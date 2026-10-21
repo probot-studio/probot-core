@@ -197,7 +197,7 @@ always carries a meaning.
 
 | Color | Meaning |
 |---|---|
-| Solid blue | DS not connected |
+| Solid blue | STOPPED, DS not connected (in INIT/RUN the phase color is shown even without a DS) |
 | Blinking blue | DS connected + STOPPED |
 | Solid yellow | INIT (Auto or TeleOp), waiting for Start |
 | Blinking yellow | TRANSITION: Auto finished, TeleOp preselected; waiting for Init |

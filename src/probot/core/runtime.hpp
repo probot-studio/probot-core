@@ -5,6 +5,7 @@
 #include <probot/core/core_config.hpp>
 #include <probot/core/wdt.hpp>
 #include <probot/core/lifecycle.hpp>
+#include <probot/core/status_led.hpp>
 #include <probot/io/battery.hpp>
 
 // Driver-station inactivity → STOP (1, default, safe) or just disconnect (0).
@@ -152,10 +153,8 @@ namespace probot {
     inline void runEmergencyStop(){
       if (__atomic_exchange_n(&probot::robot::g_estop_latched, 1u, __ATOMIC_SEQ_CST)) return;
       auto active = probot::robot::state().read();
-      bool autoActive = active.phase == probot::robot::Phase::AUTO_INIT ||
-                        active.phase == probot::robot::Phase::AUTO_RUN;
-      bool teleopActive = active.phase == probot::robot::Phase::TELEOP_INIT ||
-                          active.phase == probot::robot::Phase::TELEOP_RUN;
+      bool stopRequired = core::isActivePhase(active.phase);
+      OpMode activeMode = core::modeOfPhase(active.phase);
       setEnablePin(false);                 // hardware kill path, if wired
       // Kill the single user task. Safe for probot's own portMUX locks (they
       // can't be killed mid critical-section); only a user-held Wire/malloc
@@ -166,11 +165,8 @@ namespace probot {
       }
       // STOPPED/TRANSITION has no active OpMode, hence no hook. Otherwise run
       // exactly that mode's stop hook in a fresh task under the watchdog.
-      bool stopRequired = autoActive || teleopActive;
       __atomic_store_n(&g_estop_stop_required, stopRequired ? 1u : 0u, __ATOMIC_SEQ_CST);
-      __atomic_store_n(&g_estop_stop_mode,
-                       (uint32_t)(autoActive ? OpMode::AUTO : OpMode::TELEOP),
-                       __ATOMIC_SEQ_CST);
+      __atomic_store_n(&g_estop_stop_mode, (uint32_t)activeMode, __ATOMIC_SEQ_CST);
       __atomic_store_n(&g_estop_stop_done, stopRequired ? 0u : 1u, __ATOMIC_SEQ_CST);
       if (stopRequired) {
         uint32_t t = millis(); if (t == 0) t = 1;
@@ -187,42 +183,12 @@ namespace probot {
       static bool on = false;
       on = !on;
       auto s = probot::robot::state().read();
-      uint8_t r = 0, g = 0, b = 0;
-
-      if (estop){
-        r = 255;                         // solid red — terminal
-      } else if (s.deadlineMiss){
-        if (on) r = 255;                 // blinking red — stalled (held safe)
-      } else if (s.clientCount <= 0) {
-        b = 255;                         // solid blue — no Driver Station
-      } else {
-        switch (s.phase){
-          case probot::robot::Phase::STOPPED:
-            b = 255;
-            if (!on) b = 0;              // blink blue — connected, stopped
-            break;
-          case probot::robot::Phase::AUTO_INIT:
-          case probot::robot::Phase::TELEOP_INIT:
-            r = 255; g = 255;            // solid yellow
-            break;
-          case probot::robot::Phase::TRANSITION:
-            if (on){ r = 255; g = 255; } // blink yellow
-            break;
-          case probot::robot::Phase::AUTO_RUN:
-            if (on){ r = 255; g = 128; } // blink orange
-            break;
-          case probot::robot::Phase::TELEOP_RUN:
-            if (on) g = 255;             // blink green
-            break;
-        }
-      }
-      builtinled::render(r, g, b);       // single caller (sysloop): paints status
+      core::Rgb c = core::statusColor(s, estop, on);
+      builtinled::render(c.r, c.g, c.b); // single caller (sysloop): paints status
 
 #if PROBOT_RSL_PIN >= 0
       // Robot signal light: blink while the robot can move, else solid on.
-      bool moving = !estop && (s.phase == probot::robot::Phase::TELEOP_RUN ||
-                               s.phase == probot::robot::Phase::AUTO_RUN);
-      digitalWrite(PROBOT_RSL_PIN, moving ? (on ? HIGH : LOW) : HIGH);
+      digitalWrite(PROBOT_RSL_PIN, core::rslBlinking(s.phase, estop) ? (on ? HIGH : LOW) : HIGH);
 #endif
     }
 
