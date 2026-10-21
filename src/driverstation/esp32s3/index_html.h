@@ -1261,13 +1261,14 @@ const char MAIN_page[] PROGMEM = R"=====(
       en.textContent='Start';
       en.disabled=true;
     }
-    $id('mcDisable').disabled=!(inInit||inRun);
+    var stopOk=inInit||inRun||currentStatus!==2; // firmware canAcceptStop: an accepted INIT/START is still pending
+    $id('mcDisable').disabled=!stopOk;
 
     /* sürüş ekranındaki maç kontrolü ana kontrollerin aynasıdır */
     var drvInit=$id('drvInit');
     drvInit.textContent=en.textContent;
     drvInit.disabled=en.disabled;
-    $id('drvStop').disabled=!(inInit||inRun);
+    $id('drvStop').disabled=!stopOk;
     $id('drvModes').classList.toggle('locked',!modeSelectable);
     document.querySelectorAll('#drvModes .drv-mode').forEach(function(m){
       m.classList.toggle('on',m.dataset.mode===selectedMode);

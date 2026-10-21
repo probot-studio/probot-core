@@ -809,7 +809,7 @@ namespace probot::driverstation::esp32 {
         if (autoLen > 0) ds->_rs.setAutoPeriodSeconds(now, autoLen);
         ds->_rs.setStatus(now, robot::Status::START);
       } else if (strcmp(cmd, "stop") == 0) {
-        if (!core::canAcceptStop(s.phase)) return conflict("[PB-E409] STOP requires INIT or RUN — docs/hatalar#pb-e409");
+        if (!core::canAcceptStop(s.phase, s.status)) return conflict("[PB-E409] STOP requires INIT or RUN — docs/hatalar#pb-e409");
         ds->_rs.setStatus(now, robot::Status::STOP);
       } else {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "unknown command");
