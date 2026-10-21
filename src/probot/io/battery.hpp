@@ -22,9 +22,11 @@
 // elle besleme bugüne kadarki gibi çalışır (arayüz 0.0'da "Veri yok" gösterir).
 // İkisi birden tanımlanamaz (PB-E105).
 //
-// Okuma sysloop'tan (core 0) 250 ms'de bir yapılır, EMA ile yumuşatılır ve
-// yalnız 0.1 V'luk değişimde state'e yazılır — böylece her örnek ayrı bir
-// 'S' frame push'u tetiklemez.
+// Sampling runs every 250 ms in a dedicated low-priority task on core 0, never
+// in the sysloop supervisor: a slow or wedged I2C transaction must not delay
+// the stall watchdog, DS timeout or emergency-stop handling. Samples are
+// EMA-smoothed and written to state only on a 0.1 V change, so each sample
+// does not trigger its own 'S' frame push.
 #include <stdint.h>
 #include <probot/robot/state.hpp>
 
@@ -107,6 +109,7 @@ static_assert((PROBOT_BATTERY_INA_ADDR) >= 0x08 && (PROBOT_BATTERY_INA_ADDR) <= 
 
 #if PROBOT_BATTERY_ENABLED && defined(ESP32)
 #include <Arduino.h>
+#include <probot/core/core_config.hpp>
 #include <probot/telemetry/telemetry.hpp>
 #if PROBOT_BATTERY_SRC_INA
 #include <Wire.h>
@@ -153,9 +156,15 @@ namespace detail {
   inline bool     g_faultAnnounced = false;
 
   constexpr uint32_t POLL_MS   = 250;
-  // Sensör düşükken poll seyrekleşir: I2C timeout'u her denemede sysloop'u
-  // bloklar (Wire timeout ~20 ms) — arıza modunda 250 ms'de bir ödemeyelim.
+  // Poll less often while the sensor is down: every failed attempt costs an
+  // I2C timeout (~20 ms) of bus time.
   constexpr uint32_t POLL_FAULT_MS = 5000;
+  // Battery task tick. Below the supervisor so it can never starve it.
+  constexpr uint32_t TASK_TICK_MS = 50;
+  // Same as the sysloop that used to run this code: failed I2C transactions
+  // go through ESP-IDF error logging plus Serial and telemetry printing.
+  constexpr uint32_t TASK_STACK   = 4096;
+  inline TaskHandle_t g_task = nullptr;
   constexpr float    EMA_ALPHA = 0.2f;
   constexpr uint8_t  FAIL_LIMIT = 4;
 }
@@ -239,7 +248,7 @@ namespace detail {
     Wire.begin();
   #endif
     Wire.setClock(100000);
-    Wire.setTimeOut(20); // sensör yoksa sysloop'u default (50 ms) kadar bloklamasın
+    Wire.setTimeOut(20); // bound each transaction when the sensor is absent
     inaConfigure();
 #endif
   }
@@ -264,7 +273,7 @@ namespace detail {
   }
 }
 
-// Sysloop'tan (core 0) çağrılır. I2C/ADC erişimi YALNIZ bu task'tan yapılır.
+// Called only from the battery task; all battery I2C/ADC access happens there.
 inline void poll(uint32_t now_ms) {
   using namespace detail;
   uint32_t interval = (g_failStreak >= FAIL_LIMIT) ? POLL_FAULT_MS : POLL_MS;
@@ -307,6 +316,27 @@ inline void poll(uint32_t now_ms) {
   if (first || (dv != g_lastPubDv && distDv >= 0.6f)) {
     g_lastPubDv = dv;
     probot::robot::state().setBatteryVoltage(now_ms, (float)dv / 10.0f);
+  }
+}
+
+namespace detail {
+  inline void batteryTask(void*) {
+    for (;;) {
+      poll(millis());
+      vTaskDelay(pdMS_TO_TICKS(TASK_TICK_MS));
+    }
+  }
+}
+
+// Started once by runtime_setup(). Priority 1 on core 0: below the sysloop
+// supervisor (PRIO_CTRL) and not subscribed to the task watchdog, so a hung
+// bus stalls only battery readings.
+inline void startTask() {
+  if (detail::g_task) return;
+  if (xTaskCreatePinnedToCore(detail::batteryTask, "battery", detail::TASK_STACK,
+                              NULL, PRIO_USER, &detail::g_task, CORE_UI) != pdPASS) {
+    detail::g_task = nullptr;
+    Serial.println("[BATT ] battery task could not be created (out of memory): no automatic battery readings");
   }
 }
 
