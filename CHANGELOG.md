@@ -23,6 +23,14 @@ Biçim [Keep a Changelog](https://keepachangelog.com/), sürümler
   `tools/sync_version.py` (CI checks for drift).
 - `PROBOT_USER_STACK`: user task stack size (default 8192, minimum 4096,
   PB-E107).
+- `probot::dashboard`: a thread-safe topic store for telemetry and
+  tunables (`publish`, `set`, `unpublish`, `setProperties`, `setFlags`,
+  `addSchema`, `drainWrites`, `rejectWrite`, `stats`), streamed to the
+  Driver Station over the existing WebSocket with new frames `'C'`, `'A'`,
+  `'V'`, `'R'`, `'K'` and accepting `'W'` writes and `'Q'` resync. Limits
+  via `PROBOT_DASH_*` (PB-E108); `/health` reports `dashTopics`,
+  `dashBytes`, `dashDropped`. The Driver Station page does not show the
+  topics yet.
 
 ### Changed
 - `probot::emergencyStop()` moved to `robot/state.hpp` and
