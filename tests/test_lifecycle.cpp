@@ -158,6 +158,21 @@ TEST_CASE(command_acceptance_closes_status_phase_gap){
   EXPECT_TRUE(!core::canAcceptStop(Phase::TRANSITION, Status::STOP));
 }
 
+TEST_CASE(inputs_enabled_only_in_started_unstalled_run){
+  using robot::Phase; using robot::Status;
+  auto snap = [](Phase p, Status st, bool stalled) {
+    robot::StateSnapshot s{};
+    s.phase = p; s.status = st; s.deadlineMiss = stalled;
+    return s;
+  };
+  EXPECT_TRUE(core::inputsEnabled(snap(Phase::AUTO_RUN, Status::START, false)));
+  EXPECT_TRUE(core::inputsEnabled(snap(Phase::TELEOP_RUN, Status::START, false)));
+  EXPECT_TRUE(!core::inputsEnabled(snap(Phase::TELEOP_RUN, Status::START, true)));  // stalled
+  EXPECT_TRUE(!core::inputsEnabled(snap(Phase::TELEOP_RUN, Status::STOP, false)));  // STOP pending
+  EXPECT_TRUE(!core::inputsEnabled(snap(Phase::TELEOP_INIT, Status::START, false))); // START pending
+  EXPECT_TRUE(!core::inputsEnabled(snap(Phase::STOPPED, Status::STOP, false)));
+}
+
 TEST_CASE(stale_auto_start_does_not_expire_before_auto_run){
   robot::StateService rs;
   core::Supervisor sup;

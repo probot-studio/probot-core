@@ -94,8 +94,9 @@ namespace probot::core {
   inline bool canAcceptModeChange(robot::Phase phase, robot::Status status) {
     return canSelectMode(phase) && status == robot::Status::STOP;
   }
+  // INIT has the same precondition as a mode change: idle and nothing pending.
   inline bool canAcceptInit(robot::Phase phase, robot::Status status) {
-    return canSelectMode(phase) && status == robot::Status::STOP;
+    return canAcceptModeChange(phase, status);
   }
   inline bool canAcceptStart(robot::Phase phase, robot::Status status) {
     return isInitPhase(phase) && status == robot::Status::INIT;
@@ -103,7 +104,13 @@ namespace probot::core {
   // STOP is also accepted while an accepted INIT/START has not yet been
   // published as a phase, so an immediate abort is never rejected.
   inline bool canAcceptStop(robot::Phase phase, robot::Status status) {
-    return isInitPhase(phase) || isRunPhase(phase) || status != robot::Status::STOP;
+    return isActivePhase(phase) || status != robot::Status::STOP;
+  }
+
+  // Input gate shared by the WebSocket and HTTP joystick paths: controller
+  // input reaches user code only in a started RUN phase that is not stalled.
+  inline bool inputsEnabled(const robot::StateSnapshot& s) {
+    return isRunPhase(s.phase) && s.status == robot::Status::START && !s.deadlineMiss;
   }
 
   class PhaseMachine {
@@ -262,8 +269,7 @@ namespace probot::core {
 
   inline bool isStalled(robot::Phase phase, uint32_t now, uint32_t heartbeat_ms,
                         uint32_t deadline_ms) {
-    bool userLoopPhase = isInitPhase(phase) || isRunPhase(phase);
-    return userLoopPhase && heartbeat_ms != 0 &&
+    return isActivePhase(phase) && heartbeat_ms != 0 &&
            (int32_t)(now - heartbeat_ms) > (int32_t)deadline_ms;
   }
 
