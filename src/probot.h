@@ -12,16 +12,25 @@
 // [PB-E202] "multiple definition of `setup()`/`loop()`": setup()/loop()
 //   kütüphaneye aittir, sketch'te TANIMLANMAZ — hook'ları kullanın.
 //   Docs: probotstudio.com/docs/hatalar/#pb-e202
+//
+// A framework layer (see <probot/framework.hpp>) defines PROBOT_FRAMEWORK
+// before this header; every hook is then optional.
+#ifdef PROBOT_FRAMEWORK
+#define PROBOT_REQUIRED_HOOK __attribute__((weak))
+#else
+#define PROBOT_REQUIRED_HOOK
+#endif
 void autonomousInit() __attribute__((weak));
 void autonomousInitLoop() __attribute__((weak));
 void autonomousStart() __attribute__((weak));
-void autonomousLoop();
-void autonomousStop();
+void autonomousLoop() PROBOT_REQUIRED_HOOK;
+void autonomousStop() PROBOT_REQUIRED_HOOK;
 void teleopInit() __attribute__((weak));
 void teleopInitLoop() __attribute__((weak));
 void teleopStart() __attribute__((weak));
-void teleopLoop();
-void teleopStop();
+void teleopLoop() PROBOT_REQUIRED_HOOK;
+void teleopStop() PROBOT_REQUIRED_HOOK;
+#undef PROBOT_REQUIRED_HOOK
 
 // [PB-E106] "redefinition of `void robotInit()`" / "robotEnd()": these 0.3.x
 //   hooks were removed in 0.4.0 and would silently never run. They are deleted
@@ -30,6 +39,9 @@ void teleopStop();
 //   Docs: probotstudio.com/docs/hatalar/#pb-e106
 void robotInit() = delete; // [PB-E106] removed in 0.4.0: move this code into teleopInit()/autonomousInit()
 void robotEnd() = delete;  // [PB-E106] removed in 0.4.0: move this code into teleopStop()/autonomousStop()
+
+// Config-free API (also usable from other .cpp files)
+#include <probot/api.hpp>
 
 // Core runtime
 #include <probot/core/core_config.hpp>

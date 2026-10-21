@@ -133,6 +133,7 @@ All of them are defined **before** the `#include <probot.h>` line.
 | `PROBOT_BATTERY_INA_SDA` / `_SCL` | board default | I2C pins for the INA |
 | `PROBOT_BATTERY_TRIM` | `1.0f` | Fine-tuning multiplier against a multimeter (0.5-2.0) |
 | `USER_LOOP_PERIOD_MS` | `20` | Call period of InitLoop/loop (~50 Hz) |
+| `PROBOT_USER_STACK` | `8192` | User task stack in bytes (at least 4096) [PB-E107] |
 | `NEOPIXEL_BRIGHTNESS` | `32` | Status LED brightness (0-255) |
 
 ## Competition day: channel plan

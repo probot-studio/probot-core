@@ -258,9 +258,11 @@ namespace probot::driverstation::esp32 {
       }
 
       uint32_t now = millis();
+      probot::io::rawGamepad().write(now, axes, nA, buttons, nB);
       if (probot::core::inputsEnabled(probot::robot::state().read())) _gs.write(now, axes, nA, buttons, nB);
       else _gs.write(now, nullptr, 0, nullptr, 0); // INIT/disabled stays neutral
       __atomic_store_n(&probot::robot::g_ds_last_activity_ms, now, __ATOMIC_SEQ_CST);
+      probot::robot::noteDsPacket();
     }
 
     uint8_t* trackFd(int fd) {

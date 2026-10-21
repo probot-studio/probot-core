@@ -242,3 +242,42 @@ TEST_CASE(stall_detection_includes_init_loop){
   EXPECT_TRUE(isStalled(robot::Phase::TRANSITION, 5000, 1000, 2000) == false);
   EXPECT_TRUE(isStalled(robot::Phase::AUTO_INIT, 5000, 0, 2000) == false);
 }
+
+namespace {
+  void fw_pre()  { g_calls.push_back("pre:" + std::to_string(*g_hb)); g_clock_now += 7; }
+  void fw_post() { g_calls.push_back("post:" + std::to_string(*g_hb)); g_clock_now += 5; }
+}
+
+// Framework preCycle/postCycle run around the OpMode hook in every stage,
+// each with a freshly stamped heartbeat, and the iteration ends stamped.
+TEST_CASE(framework_cycle_wraps_every_stage_with_fresh_heartbeats){
+  g_calls.clear();
+  robot::StateService rs;
+  core::PhaseMachine m;
+  auto h = mkHooks();
+  volatile uint32_t hb = 0;
+  g_hb = &hb;
+
+  g_clock_now = 100;
+  m.cycle(h, fw_pre, fw_post, {OpMode::TELEOP, Stage::STOPPED}, rs, 100, nullptr, &hb, h_clockNow);
+  EXPECT_TRUE(hb == 112u);
+  m.cycle(h, fw_pre, fw_post, {OpMode::TELEOP, Stage::INIT}, rs, 200, nullptr, &hb, h_clockNow);
+  m.cycle(h, fw_pre, fw_post, {OpMode::TELEOP, Stage::RUN}, rs, 300, nullptr, &hb, h_clockNow);
+
+  const std::vector<std::string> expected{
+    "pre:100", "post:107",
+    "pre:112", "teleopInit", "teleopInitLoop", "post:119",
+    "pre:124", "teleopStart", "teleopLoop", "post:131"
+  };
+  EXPECT_TRUE(g_calls == expected);
+  EXPECT_TRUE(hb == 136u);
+
+  // Null framework hooks: the cycle is exactly step() plus a final stamp.
+  g_calls.clear();
+  g_clock_now = 300;
+  m.cycle(h, nullptr, nullptr, {OpMode::TELEOP, Stage::RUN}, rs, 300, nullptr, &hb, h_clockNow);
+  EXPECT_TRUE(g_calls == std::vector<std::string>{ "teleopLoop" });
+  EXPECT_TRUE(hb == 300u);
+  g_hb = nullptr;
+  g_clock_now = 0;
+}

@@ -617,6 +617,7 @@ namespace probot::driverstation::esp32 {
     // stale values (last-command runaway when the link dies).
     void onOwnerReleased(uint32_t now_ms) {
       _gs.write(now_ms, nullptr, 0, nullptr, 0);
+      io::rawGamepad().write(now_ms, nullptr, 0, nullptr, 0);
       // Another client may have legitimately taken the slot between the
       // release (inside the mux) and here — don't clobber its count.
       portENTER_CRITICAL(&_owner_mux);
@@ -730,8 +731,10 @@ namespace probot::driverstation::esp32 {
       parseFloatArray(body, "axes", axes, 20, nA);
       parseBoolArray(body, "buttons", buttons, 20, nB);
       uint32_t now = millis();
+      io::rawGamepad().write(now, axes, nA, buttons, nB);
       if (core::inputsEnabled(ds->_rs.read())) ds->_gs.write(now, axes, nA, buttons, nB);
       else ds->_gs.write(now, nullptr, 0, nullptr, 0);
+      robot::noteDsPacket();
 
       httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
       return ESP_OK;
@@ -811,6 +814,7 @@ namespace probot::driverstation::esp32 {
         return ESP_OK;
       }
 
+      robot::noteDsPacket();
       httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
       return ESP_OK;
     }

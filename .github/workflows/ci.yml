@@ -74,3 +74,8 @@ jobs:
             make tests/control_tests
             ./tests/control_tests
           fi
+
+      - name: Check generated version files
+        run: |
+          python3 tools/sync_version.py
+          git diff --exit-code

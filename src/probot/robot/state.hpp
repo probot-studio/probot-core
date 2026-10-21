@@ -97,6 +97,14 @@ namespace probot::robot {
   // Checked by sysloop to detect connection loss.
   inline volatile uint32_t g_ds_last_activity_ms = 0;
 
+  // Incremented on every Driver Station joystick frame and accepted mode,
+  // INIT, START or STOP command; lets polling code detect "new DS data"
+  // without comparing values.
+  inline volatile uint32_t g_ds_packet_seq = 0;
+  inline void noteDsPacket(){
+    __atomic_add_fetch(&g_ds_packet_seq, 1u, __ATOMIC_SEQ_CST);
+  }
+
   // Emergency stop. Set requested=1 from an HTTP handler; the sysloop runs
   // the terminal emergency-stop sequence and sets latched=1. While latched,
   // init/start commands are refused — the robot stays dead until reboot.
@@ -104,4 +112,14 @@ namespace probot::robot {
   inline volatile uint32_t g_estop_latched   = 0;
   // Deliberate software reboot request (the "reboot to clear estop" button).
   inline volatile uint32_t g_reboot_requested = 0;
+}
+
+namespace probot {
+  // Request a terminal emergency stop. Safe to call from ANY task, including
+  // a user hook: it only sets a flag. The sysloop runs the real sequence
+  // (kill the user task, run the active stop under a watchdog, latch),
+  // so it never deletes its own caller.
+  inline void emergencyStop(){
+    __atomic_store_n(&probot::robot::g_estop_requested, 1u, __ATOMIC_SEQ_CST);
+  }
 }

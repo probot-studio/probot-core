@@ -35,6 +35,8 @@ Rules that generated code MUST follow:
 - initLoop/loop hooks are called repeatedly (~50 Hz); do not write infinite
   loops or block longer than 2 s inside them.
 - Telemetry to the driver station panel: `probot::printf("v=%.2f\n", v);`
+- Extra .cpp files include `<probot/api.hpp>` (config-free), never
+  `<probot.h>`, which belongs to the sketch only.
 - Inputs auto-zero 500 ms after the link drops — driving motors directly
   from axis values is safe.
 - Battery gauge in the UI: EITHER a voltage divider on an ADC1 pin

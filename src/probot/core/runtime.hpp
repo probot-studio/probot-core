@@ -7,6 +7,7 @@
 #include <probot/core/lifecycle.hpp>
 #include <probot/core/status_led.hpp>
 #include <probot/io/battery.hpp>
+#include <probot/framework.hpp>
 
 // Driver-station inactivity → STOP (1, default, safe) or just disconnect (0).
 #ifndef PROBOT_DS_TIMEOUT_MS
@@ -56,9 +57,6 @@
 
 namespace probot {
   void runtime_setup();
-  // Terminal emergency stop: kill the user task, run the active stop hook
-  // under a watchdog, latch dead until reboot. Safe to call from any task.
-  void emergencyStop();
 }
 
 namespace probot {
@@ -86,25 +84,40 @@ namespace probot {
     inline volatile uint32_t g_estop_stop_start    = 0;
     inline volatile uint32_t g_estop_stop_done     = 0;
     inline volatile uint32_t g_estop_stop_required = 0;
+    inline volatile uint32_t g_estop_call_stop     = 0;
     inline volatile uint32_t g_estop_stop_mode     = (uint32_t)OpMode::TELEOP;
 
     inline core::PhaseMachine g_machine;
 
+    // Framework hooks, frozen by runtime_setup() before any task starts.
+    inline framework::Hooks g_framework{ nullptr, nullptr, nullptr, nullptr };
+
     inline void emptyHook() {}
+
+    // Every hook may be a weak, undefined symbol (always for the optional
+    // ones; also for the required ones when PROBOT_FRAMEWORK is defined).
+    // Taking the pointer as a parameter keeps -Waddress quiet for the
+    // strong declarations.
+    inline void (*orEmpty(void (*fn)()))() { return fn ? fn : &emptyHook; }
 
     inline core::Hooks userHooks(){
       return core::Hooks{
-        ::autonomousInit ? &::autonomousInit : &emptyHook,
-        ::autonomousInitLoop ? &::autonomousInitLoop : &emptyHook,
-        ::autonomousStart ? &::autonomousStart : &emptyHook,
-        &::autonomousLoop,
-        &::autonomousStop,
-        ::teleopInit ? &::teleopInit : &emptyHook,
-        ::teleopInitLoop ? &::teleopInitLoop : &emptyHook,
-        ::teleopStart ? &::teleopStart : &emptyHook,
-        &::teleopLoop,
-        &::teleopStop
+        orEmpty(&::autonomousInit),
+        orEmpty(&::autonomousInitLoop),
+        orEmpty(&::autonomousStart),
+        orEmpty(&::autonomousLoop),
+        orEmpty(&::autonomousStop),
+        orEmpty(&::teleopInit),
+        orEmpty(&::teleopInitLoop),
+        orEmpty(&::teleopStart),
+        orEmpty(&::teleopLoop),
+        orEmpty(&::teleopStop)
       };
+    }
+
+    inline void primeLoopHeartbeat(){
+      uint32_t t = millis();
+      __atomic_store_n(&probot::robot::g_loop_heartbeat_ms, t == 0 ? 1u : t, __ATOMIC_SEQ_CST);
     }
 
     inline void zeroInputs(){
@@ -117,25 +130,33 @@ namespace probot {
     // Created once, NEVER deleted in normal operation. All hooks run
     // here, in sequence, only at loop boundaries — so a Stop or phase change
     // can never interrupt user code mid-transaction and orphan a lock.
+    // Framework preCycle/postCycle wrap every iteration (see
+    // PhaseMachine::cycle).
     inline void userTask(void*){
       auto hooks = userHooks();
+      const framework::Hooks fw = g_framework;
       auto& rs = probot::robot::state();
-      __atomic_store_n(&probot::robot::g_loop_heartbeat_ms, millis(), __ATOMIC_SEQ_CST);
+      primeLoopHeartbeat();
+      if (fw.boot) fw.boot();
       for(;;){
         DesiredState req = unpackRequested(
           __atomic_load_n(&g_requested_state, __ATOMIC_SEQ_CST));
-        g_machine.step(hooks, req, rs, millis(), &zeroInputs,
-                       &probot::robot::g_loop_heartbeat_ms, &userClockNow);
-        __atomic_store_n(&probot::robot::g_loop_heartbeat_ms, millis(), __ATOMIC_SEQ_CST);
+        g_machine.cycle(hooks, fw.preCycle, fw.postCycle, req, rs, millis(), &zeroInputs,
+                        &probot::robot::g_loop_heartbeat_ms, &userClockNow);
         vTaskDelay(pdMS_TO_TICKS(USER_LOOP_PERIOD_MS));
       }
     }
 
     // ── Emergency stop ──
+    // Runs on core 1, so it starts only once the deleted user task is off the
+    // CPU. The framework output kill comes first; both share the
+    // PROBOT_ESTOP_END_MS budget (PB-E305).
     inline void estopStopTask(void*){
-      OpMode mode = (OpMode)__atomic_load_n(&g_estop_stop_mode, __ATOMIC_SEQ_CST);
-      if (mode == OpMode::AUTO) ::autonomousStop();
-      else ::teleopStop();
+      if (g_framework.emergencyStop) g_framework.emergencyStop();
+      if (__atomic_load_n(&g_estop_call_stop, __ATOMIC_SEQ_CST)) {
+        OpMode mode = (OpMode)__atomic_load_n(&g_estop_stop_mode, __ATOMIC_SEQ_CST);
+        (mode == OpMode::AUTO ? orEmpty(&::autonomousStop) : orEmpty(&::teleopStop))();
+      }
       __atomic_store_n(&g_estop_stop_done, 1u, __ATOMIC_SEQ_CST);
       vTaskSuspend(NULL);
     }
@@ -164,11 +185,14 @@ namespace probot {
         g_user_task = nullptr;
       }
       // STOPPED/TRANSITION has no active OpMode, hence no hook. Otherwise run
-      // exactly that mode's stop hook in a fresh task under the watchdog.
-      __atomic_store_n(&g_estop_stop_required, stopRequired ? 1u : 0u, __ATOMIC_SEQ_CST);
+      // exactly that mode's stop hook in a fresh task under the watchdog,
+      // after the framework emergencyStop callback if one is installed.
+      bool taskRequired = stopRequired || g_framework.emergencyStop != nullptr;
+      __atomic_store_n(&g_estop_call_stop, stopRequired ? 1u : 0u, __ATOMIC_SEQ_CST);
+      __atomic_store_n(&g_estop_stop_required, taskRequired ? 1u : 0u, __ATOMIC_SEQ_CST);
       __atomic_store_n(&g_estop_stop_mode, (uint32_t)activeMode, __ATOMIC_SEQ_CST);
-      __atomic_store_n(&g_estop_stop_done, stopRequired ? 0u : 1u, __ATOMIC_SEQ_CST);
-      if (stopRequired) {
+      __atomic_store_n(&g_estop_stop_done, taskRequired ? 0u : 1u, __ATOMIC_SEQ_CST);
+      if (taskRequired) {
         uint32_t t = millis(); if (t == 0) t = 1;
         __atomic_store_n(&g_estop_stop_start, t, __ATOMIC_SEQ_CST);
         xTaskCreatePinnedToCore(estopStopTask, "estop", STACK_USER, NULL,
@@ -290,14 +314,6 @@ namespace probot {
     }
   } // namespace detail
 
-  // Request a terminal emergency stop. Safe to call from ANY task, including
-  // a user hook: it only sets a flag. The sysloop runs the real sequence
-  // (kill the user task, run the active stop under a watchdog, latch),
-  // so it never deletes its own caller.
-  inline void emergencyStop(){
-    __atomic_store_n(&probot::robot::g_estop_requested, 1u, __ATOMIC_SEQ_CST);
-  }
-
   inline void runtime_setup(){
     Serial.begin(115200);
     delay(200);
@@ -313,6 +329,12 @@ namespace probot {
 #endif
 
     wdt_init_no_idle(PROBOT_WDT_TIMEOUT_S, true);
+    detail::g_framework = framework::seal();
+    // gamepad.hpp is config-free and may be included by several TUs, so the
+    // sketch's PROBOT_INPUT_TIMEOUT_MS is applied here, not by whichever
+    // TU happens to construct the services.
+    probot::io::gamepad().setTimeoutMs(PROBOT_INPUT_TIMEOUT_MS);
+    probot::io::rawGamepad().setTimeoutMs(PROBOT_INPUT_TIMEOUT_MS);
 
 #ifdef ESP32
     probot::driverstation::start_driver_station();

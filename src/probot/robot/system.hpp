@@ -6,16 +6,6 @@
 #include <driverstation/esp32s3/driver_station_esp32.hpp>
 #endif
 
-namespace probot::io {
-  namespace detail {
-    inline GamepadService g_gamepad_singleton;
-  }
-
-  inline GamepadService& gamepad(){
-    return detail::g_gamepad_singleton;
-  }
-}
-
 namespace probot::driverstation {
   namespace detail {
 #ifdef ESP32
