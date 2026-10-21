@@ -32,6 +32,7 @@ const char MAIN_page[] PROGMEM = R"=====(
       --green-deep:#1c7c33;
       --stop:#d93025;
       --stop-deep:#8c0c0c;
+      --info:#1a73e8;
       --grad-brand:linear-gradient(150deg,var(--orange-500),var(--orange-600));
       --grad-blob:linear-gradient(150deg,var(--amber),var(--orange-600));
       --shadow-1:0 4px 12px rgba(214,54,0,0.06);
@@ -565,6 +566,32 @@ const char MAIN_page[] PROGMEM = R"=====(
     .ch-row select{flex:1;min-width:0;}
     .hint{font-size:0.7rem;color:var(--muted);font-weight:600;}
 
+    /* ================= DATA PAGE (dashboard topics) ================= */
+    .dk-tree summary{cursor:pointer;padding:6px 2px;font-weight:800;font-size:0.84rem;color:var(--ink);}
+    .dk-kids{margin-left:6px;padding-left:10px;border-left:1px dashed var(--line);}
+    .dk-badge{font:700 0.6rem/1 var(--mono);letter-spacing:0.05em;color:var(--orange-700);background:var(--soft);
+      border:1px solid var(--line);border-radius:999px;padding:3px 7px;margin-left:8px;}
+    .dk-row{display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;padding:6px 2px;border-top:1px solid var(--line);}
+    .dk-k{flex:1 1 130px;min-width:0;font-size:0.78rem;font-weight:700;color:var(--muted);word-break:break-all;}
+    .dk-v{flex:2 1 200px;min-width:0;display:flex;align-items:center;gap:7px;
+      font:600 0.8rem/1.45 var(--mono);color:var(--ink);white-space:pre-wrap;word-break:break-word;}
+    .dk-u{font:700 0.7rem var(--mono);color:var(--muted);flex:none;}
+    .dk-s{flex:none;font:700 0.6rem/1 var(--mono);letter-spacing:0.05em;text-transform:uppercase;color:var(--muted);}
+    .dk-row.pend .dk-s{color:#8a5a00;}
+    .dk-row.err .dk-s{color:var(--stop);}
+    .dk-ed{flex:1;min-width:0;max-width:320px;padding:6px 9px;border-radius:8px;border:1px solid var(--line);background:#fff;
+      font:600 0.82rem var(--mono);color:var(--ink);resize:none;}
+    .dk-ed:focus{outline:none;border-color:var(--amber);box-shadow:0 0 0 3px rgba(255,176,32,0.25);}
+    input.dk-ed[type=checkbox]{flex:none;width:20px;height:20px;accent-color:var(--orange-600);}
+    .dk-row.pend .dk-ed{border-color:var(--amber);}
+    .dk-al{display:flex;gap:8px;align-items:baseline;padding:5px 2px;border-top:1px solid var(--line);font-size:0.8rem;word-break:break-word;}
+    .dk-al b{flex:none;align-self:center;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;
+      border-radius:50%;font:800 0.7rem/1 var(--mono);color:#fff;}
+    .dk-al.e b{background:var(--stop);}
+    .dk-al.w b{background:var(--amber);color:var(--ink);}
+    .dk-al.i b{background:var(--info);}
+    .btn.dk-stop{background:#fff;color:var(--stop);border:1px solid var(--stop);box-shadow:0 2px 0 var(--stop);}
+
     /* ================= OVERLAYS ================= */
     .overlay{position:fixed;inset:0;z-index:9999;display:none;flex-direction:column;
       justify-content:center;align-items:center;gap:14px;color:#fff;text-align:center;padding:24px;}
@@ -667,6 +694,7 @@ const char MAIN_page[] PROGMEM = R"=====(
       </a>
       <nav>
         <a class="nav-link active" data-page="dashboard" onclick="showPage('dashboard')">Dashboard</a>
+        <a class="nav-link" data-page="data" onclick="showPage('data')">Veri</a>
         <a class="nav-link" data-page="joystick" onclick="showPage('joystick')">Joystick</a>
         <a class="nav-link" data-page="logs" onclick="showPage('logs')">Logs</a>
       </nav>
@@ -801,6 +829,20 @@ const char MAIN_page[] PROGMEM = R"=====(
             <div class="console" id="telemetry"></div>
           </div>
 
+        </div>
+      </section>
+
+      <!-- ================= DATA: dashboard topic tree ================= -->
+      <section class="page" id="page-data">
+        <div class="jgrid">
+          <div class="widget" style="grid-column:1/-1;">
+            <div class="tele-head">
+              <div class="w-head">Veri</div>
+              <div class="tele-actions"><span class="hint" id="dkCount">0 topic</span></div>
+            </div>
+            <p class="hint" id="dkEmpty">Robot henüz topic yayınlamadı. probot::dashboard::publish() ile açılanlar burada görünür; /Tunables altındakiler buradan değiştirilebilir.</p>
+            <div class="dk-tree" id="dkTree"></div>
+          </div>
         </div>
       </section>
 
@@ -1345,13 +1387,14 @@ const char MAIN_page[] PROGMEM = R"=====(
   }
   $id('estopButton').addEventListener('click',function(){doEstop();});
   /* FRC DS geleneği: Space = acil durdurma — HER ZAMAN. Sayı kutusunda
-     boşluğun anlamı yok; yalnız açılır listede (Space = listeyi açar)
-     bastırılır. e.code eski tarayıcıda yoksa keyCode'a düşülür. */
+     boşluğun anlamı yok; açılır listede ve metin kutusunda yalnız robot
+     STOPPED iken bastırılır (yazmak için), aksi halde yine e-stop.
+     e.code eski tarayıcıda yoksa keyCode'a düşülür. */
   addEventListener('keydown',function(e){
     var isSpace=(e.code==='Space')||(!e.code&&(e.keyCode===32||e.key===' '));
     if(!isSpace) return;
     var t=document.activeElement;
-    if(t&&(t.tagName==='SELECT'||t.tagName==='TEXTAREA')) return;
+    if(t&&(t.tagName==='SELECT'||t.tagName==='TEXTAREA')&&currentPhase===0) return;
     e.preventDefault(); if(t&&t.blur)t.blur(); doEstop();
   });
   $id('rebootButton').addEventListener('click',function(){
@@ -1723,12 +1766,15 @@ const char MAIN_page[] PROGMEM = R"=====(
       var data;
       try{data=JSON.parse(textDecoder.decode(v.subarray(1)));}catch(e){return;}
       lastDataMs=performance.now();
+      if(data.dashMax>0) dkMax=data.dashMax;
       applyState(data);
       applyHealth(data);
     }else if(v[0]===0x54){ /* 'T' telemetry */
       lastDataMs=performance.now();
       if(!telemCleared) renderTelemetry(textDecoder.decode(v.subarray(1)));
       else telemCleared=false; /* clear sonrası ilk frame'i atla, sonra akış sürer */
+    }else{
+      dkFrame(v); /* dashboard frames; unknown types are ignored */
     }
   }
   function connectWebSocket(){
@@ -1736,7 +1782,8 @@ const char MAIN_page[] PROGMEM = R"=====(
     try{
       var ws=new WebSocket('ws://'+location.host+'/joystick');
       ws.binaryType='arraybuffer';
-      ws.onopen=function(){wsConnected=true;wsLastActivity=performance.now();evlog('info','WebSocket bağlandı');updateDebugPanel();};
+      ws.onopen=function(){wsConnected=true;wsLastActivity=performance.now();evlog('info','WebSocket bağlandı');updateDebugPanel();
+        dkReset();dkLastQ=Date.now();try{ws.send(new Uint8Array([0x51]));}catch(e){} /* 'Q': robot re-sends every topic */};
       ws.onclose=function(){wsConnected=false;wsJoystick=null;scheduleReconnect();updateDebugPanel();};
       ws.onerror=function(){wsConnected=false;};
       ws.onmessage=handleWsMessage;
@@ -1801,6 +1848,404 @@ const char MAIN_page[] PROGMEM = R"=====(
   setInterval(function(){
     if(wsConnected) fetchHealth();
   },10000);
+
+  /* =========================================================================
+     DASHBOARD CODEC - 'C' schema, 'A' announce, 'V' values, 'R' remove,
+     'K' write refusal (robot -> page) and 'W' write values (page -> robot).
+     All little-endian; layouts follow probot/dashboard/dashboard.hpp.
+     ValueType: 1 bool u8, 2 int i64, 3 f32, 4 f64, 5 UTF-8, 6 raw/struct,
+     7-10 bool/int/f32/f64 arrays, 11 string[] of {u16 len, bytes}.
+     ========================================================================= */
+  function dkMap(){return Object.create(null);}
+  var dkTopics=dkMap();   /* id -> {id,vt,flags,name,type,props,raw,val,pend,err,ui} */
+  var dkSchemas=dkMap();  /* "struct:X" -> structschema text */
+  var dkLayouts=dkMap();  /* "X" -> parsed layout, cleared when a schema arrives */
+  var DK_ES=[0,1,8,4,8];
+  var DK_REFUSE=['','Bilinmeyen topic','Değiştirilemez','Tip uyuşmazlığı','Değer çözümlenemedi','Yazma kuyruğu dolu'];
+  var DK_PRIM={bool:[1,'b'],char:[1,'c'],int8:[1,'i'],int16:[2,'i'],int32:[4,'i'],int64:[8,'i'],
+    uint8:[1,'u'],uint16:[2,'u'],uint32:[4,'u'],uint64:[8,'u'],float:[4,'f'],float32:[4,'f'],double:[8,'f'],float64:[8,'f']};
+  /* 64-bit ints stay Numbers while exact; BigInt only beyond 2^53 (old tablets lack it). */
+  function dkI64(dv,o,u){
+    var lo=dv.getUint32(o,true),hi=u?dv.getUint32(o+4,true):dv.getInt32(o+4,true),n=hi*4294967296+lo;
+    if(Math.abs(n)<=9007199254740991||typeof BigInt!=='function') return n;
+    return BigInt(hi)*BigInt(4294967296)+BigInt(lo);
+  }
+  function dkW64(dv,o,x){
+    var n=+x,hi;
+    if(Math.abs(n)<=9007199254740991||typeof BigInt!=='function'){
+      hi=Math.floor(n/4294967296);dv.setUint32(o,n-hi*4294967296,true);dv.setInt32(o+4,hi,true);return;
+    }
+    var b=BigInt.asUintN(64,BigInt(String(x))),k=BigInt(4294967296);
+    dv.setUint32(o,Number(b%k),true);dv.setUint32(o+4,Number(b/k),true);
+  }
+  function dkPrim(e,dv,o){return e===1?dv.getUint8(o)!==0:e===2?dkI64(dv,o):e===3?dv.getFloat32(o,true):dv.getFloat64(o,true);}
+  function dkDec(vt,b){
+    var dv=new DataView(b.buffer,b.byteOffset,b.length),a=[],o=0,s;
+    if(vt===5) return textDecoder.decode(b);
+    if(vt===11){
+      while(o+2<=b.length){s=b[o]|(b[o+1]<<8);o+=2;a.push(textDecoder.decode(b.subarray(o,o+s)));o+=s;}
+      return a;
+    }
+    if(vt>=7&&vt<=10){s=DK_ES[vt-6];for(;o+s<=b.length;o+=s)a.push(dkPrim(vt-6,dv,o));return a;}
+    if(vt>=1&&vt<=4) return b.length>=DK_ES[vt]?dkPrim(vt,dv,0):undefined;
+    return b;
+  }
+  /* Exact sizes: bool 1, int 8, float 4, double 8 per element. */
+  function dkEnc(vt,v){
+    var te=new TextEncoder(),out,dv,n=0,o=0;
+    if(vt===5) return te.encode(v);
+    if(vt===11){
+      var parts=v.map(function(s){var b=te.encode(s);n+=2+b.length;return b;});
+      out=new Uint8Array(n);
+      parts.forEach(function(b){out[o]=b.length&255;out[o+1]=b.length>>8;out.set(b,o+2);o+=2+b.length;});
+      return out;
+    }
+    var e=vt>=7?vt-6:vt,a=vt>=7?v:[v],s=DK_ES[e];
+    out=new Uint8Array(s*a.length);dv=new DataView(out.buffer);
+    a.forEach(function(x,i){
+      o=i*s;
+      if(e===1) dv.setUint8(o,x?1:0); else if(e===2) dkW64(dv,o,x);
+      else if(e===3) dv.setFloat32(o,x,true); else dv.setFloat64(o,x,true);
+    });
+    return out;
+  }
+  /* Editor text -> value; throws a Turkish message. Ints stay strings for exact i64. */
+  function dkParse(vt,s,p){
+    if(vt===5) return s;
+    if(vt>=7){
+      return s.trim()?s.split(',').map(function(x){return vt===11?x.trim():dkParse(vt-6,x,{});}):[];
+    }
+    s=s.trim();
+    if(vt===1){var b=s.toLowerCase();if(b==='true'||b==='1')return true;if(b==='false'||b==='0')return false;throw 'true / false girin';}
+    if(!/^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(s)) throw 'Geçersiz sayı';
+    var n=+s;
+    if(vt===2){
+      if(!/^[-+]?\d+$/.test(s)) throw 'Tam sayı girin';
+      s=s.replace('+','');
+      if(typeof BigInt==='function'&&(BigInt(s)>BigInt('9223372036854775807')||BigInt(s)<BigInt('-9223372036854775808'))) throw 'Aralık dışı';
+    }
+    if((p.min!=null&&n<p.min)||(p.max!=null&&n>p.max)) throw 'Aralık dışı';
+    return vt===2?s:n;
+  }
+  function dkNum(x,f32){
+    if(typeof x!=='number'||x%1===0||!isFinite(x)) return String(x);
+    return String(+x.toPrecision(f32?7:15));
+  }
+
+  /* structschema: "type name;" "type name[N];" "enum {a=1, b=2} int8 name;" "uint8 a:3;" */
+  function dkLayout(name,depth){
+    if(dkLayouts[name]!==undefined) return dkLayouts[name];
+    var txt=dkSchemas['struct:'+name];
+    if(txt==null||(depth||0)>8) return null;
+    var fields=[],off=0,bf=null,ok=true;
+    txt.split(';').forEach(function(d){
+      d=d.trim();
+      if(!ok||!d) return;
+      var en=null,m=/^enum\s*\{([^}]*)\}\s*/.exec(d),nx=0;
+      if(m){
+        en={};
+        m[1].split(',').forEach(function(kv){
+          kv=kv.split('=');if(!kv[0].trim())return;
+          var val=kv.length>1?parseInt(kv[1],10):nx;en[val]=kv[0].trim();nx=val+1;
+        });
+        d=d.slice(m[0].length);
+      }
+      m=/^(\w+)\s+(\w+)\s*(?:\[\s*(\d+)\s*\])?\s*(?::\s*(\d+))?$/.exec(d);
+      if(!m){ok=false;return;}
+      var f={name:m[2],n:m[3]?+m[3]:0,bits:m[4]?+m[4]:0,en:en},pr=DK_PRIM[m[1]];
+      if(pr){f.size=pr[0];f.k=pr[1];}
+      else{f.sub=dkLayout(m[1],(depth||0)+1);if(!f.sub){ok=false;return;}f.size=f.sub.size;f.k='s';}
+      if(f.bits&&(f.n||f.k==='s'||f.k==='f'||f.k==='c')){ok=false;return;}
+      if(f.bits&&(f.bits>f.size*8||(f.k==='b'&&f.bits!==1))){ok=false;return;}
+      if(f.bits){
+        /* Bit-fields pack LSB first into a unit of the field's size; a bool joins the open unit if it has a free bit. */
+        var us=(f.k==='b'&&bf&&bf.used<bf.size*8)?bf.size:f.size;
+        if(!bf||bf.size!==us||bf.used+f.bits>us*8){bf={off:off,size:us,used:0};off+=us;}
+        f.off=bf.off;f.size=us;f.shift=bf.used;bf.used+=f.bits;
+      }else{bf=null;f.off=off;off+=f.size*(f.n||1);}
+      fields.push(f);
+    });
+    return (dkLayouts[name]=ok?{f:fields,size:off}:null);
+  }
+  function dkRd(f,dv,o){
+    var s=f.size,k=f.k;
+    if(k==='b') return dv.getUint8(o)!==0;
+    if(k==='f') return s===4?dv.getFloat32(o,true):dv.getFloat64(o,true);
+    if(s===8) return dkI64(dv,o,k==='u');
+    return dv[(k==='i'?'getInt':'getUint')+(s*8)](o,true);
+  }
+  function dkBits(f,dv,o){
+    var s=f.size,u=s===8?dv.getUint32(o+4,true)*4294967296+dv.getUint32(o,true):
+      s===4?dv.getUint32(o,true):s===2?dv.getUint16(o,true):dv.getUint8(o);
+    var x=Math.floor(u/Math.pow(2,f.shift))%Math.pow(2,f.bits);
+    if(f.k==='i'&&x>=Math.pow(2,f.bits-1)) x-=Math.pow(2,f.bits);
+    return f.k==='b'?x!==0:x;
+  }
+  /* Flattens one struct into out: [dotted name, value, isFloat32]. */
+  function dkStruct(L,dv,o,pre,out){
+    L.f.forEach(function(f){
+      var p=o+f.off,nm=pre+f.name,i,a=[],f32=f.k==='f'&&f.size===4;
+      if(f.k==='s'){for(i=0;i<(f.n||1);i++)dkStruct(f.sub,dv,p+i*f.size,nm+(f.n?'['+i+']':'')+'.',out);return;}
+      if(f.k==='c'){
+        for(i=p;i<p+(f.n||1)&&dv.getUint8(i);i++);
+        out.push([nm,textDecoder.decode(new Uint8Array(dv.buffer,dv.byteOffset+p,i-p))]);return;
+      }
+      if(f.bits) a.push(dkBits(f,dv,p)); else for(i=0;i<(f.n||1);i++) a.push(dkRd(f,dv,p+i*f.size));
+      a=a.map(function(x){return f.en&&f.en[x]!==undefined?f.en[x]:x;});
+      out.push(f.n?[nm,'['+a.map(function(x){return dkNum(x,f32);}).join(', ')+']']:[nm,a[0],f32]);
+    });
+  }
+  /* "struct:X" / "struct:X[]" raw value -> rows, or null without a usable schema. */
+  function dkStructRows(type,b){
+    var m=/^struct:(\w+)(\[\])?$/.exec(type||''),L=m&&dkLayout(m[1]),out=[],i;
+    if(!L||!L.size) return null;
+    var dv=new DataView(b.buffer,b.byteOffset,b.length);
+    if(m[2]){if(b.length%L.size)return null;for(i=0;i<b.length/L.size;i++)dkStruct(L,dv,i*L.size,'['+i+'].',out);}
+    else if(b.length===L.size) dkStruct(L,dv,0,'',out);
+    else return null;
+    return out;
+  }
+  function dkFmt(t){
+    var v=t.val,vt=t.vt,f32=vt===3||vt===9,i,h='';
+    if(v===undefined) return '--';
+    if(vt===6){
+      var r=dkStructRows(t.type,v);
+      if(r) return r.length?r.map(function(x){return x[0]+' = '+dkNum(x[1],x[2]);}).join('\n'):'[]';
+      for(i=0;i<v.length&&i<24;i++) h+=(v[i]<16?'0':'')+v[i].toString(16)+' ';
+      return v.length+' bayt'+(h?': '+h+(v.length>24?'...':''):'');
+    }
+    if(vt>=7) return v.map(function(x){return dkNum(x,f32);}).join(', ');
+    return dkNum(v,f32);
+  }
+
+  function dkReset(){dkTopics=dkMap();dkSchemas=dkMap();dkLayouts=dkMap();dkSched();}
+  /* Robot -> page dashboard frame. A truncated record ends the frame. */
+  function dkFrame(v){
+    var n=v.length,p=1,f=v[0],t,id,len,a,nm,ty,miss=false;
+    function u16(){var x=v[p]|(v[p+1]<<8);p+=2;return x;}
+    function str(l){var s=textDecoder.decode(v.subarray(p,p+l));p+=l;return s;}
+    if(f===0x43){        /* 'C': u8+name, u8+type, u16+bytes */
+      a=v[p++];if(p+a+1>n)return;nm=str(a);
+      a=v[p++];if(p+a+2>n)return;str(a);
+      len=u16();if(p+len>n)return;
+      dkSchemas[nm]=str(len);dkLayouts=dkMap();dkSched();
+    }else if(f===0x41){  /* 'A' repeated: u16 id, u8 vt, u8 flags, u8+name, u8+type, u16+props */
+      while(p+5<=n){
+        id=u16();var vt=v[p++],fl=v[p++];
+        a=v[p++];if(p+a+1>n)break;nm=str(a);
+        a=v[p++];if(p+a+2>n)break;ty=str(a);
+        len=u16();if(p+len>n)break;
+        var pr;try{pr=JSON.parse(str(len)||'{}');}catch(e){pr=null;}
+        t=dkTopics[id];
+        if(!t||t.name!==nm||t.vt!==vt) t=dkTopics[id]={id:id,ui:dkNop};
+        t.vt=vt;t.flags=fl;t.name=nm;t.type=ty;t.props=(pr&&typeof pr==='object')?pr:{};
+      }
+      dkSched();
+    }else if(f===0x56){  /* 'V': u32 robot ms, repeated u16 id, u16 len, bytes */
+      p=5;
+      while(p+4<=n){
+        id=u16();len=u16();if(p+len>n)break;
+        t=dkTopics[id];a=new Uint8Array(v.subarray(p,p+len));p+=len;
+        if(!t){miss=true;continue;}
+        var old=t.val;t.raw=a;t.val=dkDec(t.vt,a);t.pend=false;
+        if(/\/\.type$/.test(t.name)&&old!==t.val) dkSched(); else t.ui();
+      }
+    }else if(f===0x52){  /* 'R' repeated: u16 id */
+      while(p+2<=n) delete dkTopics[u16()];
+      dkSched();
+    }else if(f===0x4B){  /* 'K' repeated: u16 id, u8 status */
+      while(p+3<=n){
+        id=u16();a=v[p++];t=dkTopics[id];
+        if(!t){miss=true;continue;}
+        if(a===1){delete dkTopics[id];miss=true;dkSched();continue;} /* removed on the robot, 'R' was missed */
+        t.pend=false;t.err=DK_REFUSE[a]||('Reddedildi (kod '+a+')');t.ui(true);
+        evlog('warn','Veri yazması reddedildi: '+t.name+' ('+t.err+')');
+      }
+    }
+    if(miss) dkAskResync(); /* an announce was lost: ask for everything again */
+  }
+
+  /* =========================================================================
+     DASHBOARD UI - "Veri" page: topic tree keyed on '/' segments. Topics
+     with TUNABLE|MUTABLE flags get editors that send 'W' on commit
+     (Enter/blur/change) and stay pending until the next 'V' or a 'K'.
+     A sibling ".type" string picks a widget (Selectable, Command, Alerts)
+     or an order (PIDController).
+     Text editors are textareas: they take Space only while the robot is
+     STOPPED; in any other phase Space is still the e-stop key.
+     ========================================================================= */
+  var dkTimer=0,dkDirty=false,dkClosed=dkMap(),dkLastQ=0,dkMax=1024; /* dkMax: robot's 'dashMax' */
+  function dkNop(){}
+  function dkEl(tag,cls,txt){var e=document.createElement(tag);if(cls)e.className=cls;if(txt!=null)e.textContent=txt;return e;}
+  function dkSched(){if(!dkTimer)dkTimer=setTimeout(dkBuild,40);}
+  function dkAskResync(){
+    var ws=wsJoystick,now=Date.now();
+    if(now-dkLastQ<1000||!wsConnected||!ws||ws.readyState!==1) return;
+    dkLastQ=now;try{ws.send(new Uint8Array([0x51]));}catch(e){}
+  }
+  function dkWrite(t,bytes){
+    /* A longer 'W' would make the robot close the socket. */
+    if(bytes.length>dkMax){t.err='Değer çok uzun (en çok '+dkMax+' bayt)';t.ui(true);return;}
+    var ws=wsJoystick,f=new Uint8Array(4+bytes.length);
+    f[0]=0x57;f[1]=t.id&255;f[2]=t.id>>8;f[3]=t.vt;f.set(bytes,4);
+    try{
+      if(!wsConnected||!ws||ws.readyState!==1) throw 0;
+      ws.send(f);t.pend=true;t.err='';
+    }catch(e){t.err='Bağlantı yok';}
+    t.ui(true);
+  }
+  function dkCommit(t,s){
+    try{dkWrite(t,dkEnc(t.vt,dkParse(t.vt,s,t.props)));}
+    catch(e){t.err=typeof e==='string'?e:'Geçersiz değer';t.ui(true);}
+  }
+  function dkStat(row,s,t,idle){
+    row.classList.toggle('pend',!!t.pend);row.classList.toggle('err',!!t.err);
+    s.textContent=t.err||(t.pend?'Bekliyor':idle);
+  }
+  function dkLeaf(t,label){
+    var row=dkEl('div','dk-row'),k=dkEl('span','dk-k',label),v=dkEl('span','dk-v'),s=dkEl('span','dk-s');
+    var p=t.props,vt=t.vt,ed=null,val=null;
+    k.title=t.name+' ('+(t.type||vt)+')';
+    if((t.flags&6)===6&&vt!==6){
+      ed=dkEl(vt>4?'textarea':'input','dk-ed');
+      if(vt===1){ed.type='checkbox';ed.onchange=function(){dkWrite(t,dkEnc(1,ed.checked));ed.blur();};}
+      else{
+        if(vt<=4){
+          ed.type='number';ed.step=p.step!=null?p.step:vt===2?1:'any';
+          if(p.min!=null)ed.min=p.min;
+          if(p.max!=null)ed.max=p.max;
+          /* Arrows are drive keys and the wheel scrolls: neither may step a tunable. */
+          ed.onwheel=function(e){if(document.activeElement===ed)e.preventDefault();};
+        }else ed.rows=1;
+        ed.onkeydown=function(e){
+          if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();ed.blur();}
+          else if(vt<=4&&(e.key==='ArrowUp'||e.key==='ArrowDown')){e.preventDefault();ed.blur();}
+        };
+        ed.onchange=function(){dkCommit(t,ed.value);};
+      }
+      v.appendChild(ed);
+    }else v.appendChild(val=dkEl('span'));
+    if(p.unit!=null) v.appendChild(dkEl('span','dk-u',String(p.unit)));
+    row.appendChild(k);row.appendChild(v);row.appendChild(s);
+    var prev=t.ui; /* chained: a topic may be shown twice (PID mirror) */
+    t.ui=function(force){
+      prev(force);
+      if(!ed) val.textContent=dkFmt(t);
+      else if(force||document.activeElement!==ed){
+        if(vt===1) ed.checked=!!t.val; else ed.value=t.val===undefined?'':dkFmt(t);
+      }
+      dkStat(row,s,t,'');
+    };
+    return row;
+  }
+  function dkKid(n,k){return n.k[k]&&n.k[k].t;}
+  /* Widget for a folder whose ".type" child names a known type, else null. */
+  function dkTyped(n){
+    var ty=dkKid(n,'.type'),row=dkEl('div','dk-row'),info=dkEl('span','dk-k'),v=dkEl('span','dk-v'),s=dkEl('span','dk-s'),w,ui;
+    ty=ty&&ty.val;
+    if(ty==='Selectable'){
+      w=dkKid(n,'selected');
+      var o=dkKid(n,'options'),d=dkKid(n,'default'),a=dkKid(n,'active'),sel=dkEl('select','dk-ed');
+      if(!w||!o||w.vt!==5||o.vt!==11) return null;
+      sel.disabled=(w.flags&6)!==6;
+      sel.onchange=function(){dkWrite(w,dkEnc(5,sel.value));};
+      v.appendChild(sel);
+      ui=function(){
+        var opts=o.val||[],key=opts.join('\n');
+        if(sel.dkKey!==key){
+          sel.dkKey=key;sel.innerHTML='';
+          opts.forEach(function(x){sel.appendChild(dkEl('option',null,x)).value=x;});
+        }
+        if(document.activeElement!==sel) sel.value=w.val?w.val:(d&&d.val||'');
+        info.textContent=[d&&d.val?'Varsayılan: '+d.val:'',a&&a.val?'Aktif: '+a.val:''].filter(String).join(' · ');
+        dkStat(row,s,w,'');
+      };
+      [o,d,a].forEach(function(x){if(x)x.ui=ui;});
+    }else if(ty==='Command'){
+      w=dkKid(n,'running');
+      var nm=dkKid(n,'name'),b=dkEl('button','btn btn-sm');
+      if(!w||w.vt!==1) return null;
+      b.disabled=(w.flags&6)!==6;
+      b.onclick=function(){dkWrite(w,dkEnc(1,!w.val));};
+      v.appendChild(b);
+      ui=function(){
+        b.textContent=w.val?'Durdur':'Çalıştır';b.classList.toggle('dk-stop',!!w.val);
+        info.textContent=nm&&nm.val||'';
+        dkStat(row,s,w,w.val?'Çalışıyor':'');
+      };
+      if(nm) nm.ui=ui;
+    }else if(ty==='Alerts'){
+      /* WPILib NT alert layout: active alerts per level, newest first. */
+      var lv=[['errors','e','Hata','\u2715'],['warnings','w','Uyarı','!'],['infos','i','Bilgi','i']].map(function(x){
+        var t=dkKid(n,x[0]);return t&&t.vt===11?[t,x[1],x[2],x[3]]:null;
+      }).filter(Boolean),list=dkEl('div');
+      if(!lv.length) return null;
+      ui=function(){
+        var c=0;list.innerHTML='';
+        lv.forEach(function(x){(x[0].val||[]).forEach(function(m){
+          var r=list.appendChild(dkEl('div','dk-al '+x[1])),ic=r.appendChild(dkEl('b',null,x[3]));
+          ic.title=x[2];ic.setAttribute('aria-label',x[2]);r.appendChild(dkEl('span',null,m));c++;
+        });});
+        if(!c) list.appendChild(dkEl('div','dk-al',"Aktif uyarı yok"));
+      };
+      lv.forEach(function(x){x[0].ui=ui;});
+      return list;
+    }else return null;
+    w.ui=ui;
+    row.appendChild(info);row.appendChild(v);row.appendChild(s);
+    return row;
+  }
+  /* PIDController children in WPILib order (gains, then state); others follow alphabetically. */
+  var dkRoot={k:dkMap()};
+  var DK_PID=['p','i','d','izone','setpoint','measurement','error','error derivative','previous error','total error'];
+  function dkOrder(node){
+    var ty=dkKid(node,'.type'),keys=Object.keys(node.k).sort();
+    if(!ty||ty.val!=='PIDController') return keys;
+    function rank(k){var i=DK_PID.indexOf(k);return i<0?DK_PID.length:i;}
+    return keys.sort(function(a,b){return rank(a)-rank(b)||(a<b?-1:a>b?1:0);});
+  }
+  function dkRender(par,node,path){
+    dkOrder(node).forEach(function(seg){
+      var c=node.k[seg],p=path+'/'+seg,kids=Object.keys(c.k).length;
+      if(c.t&&!(seg==='.type'&&!kids)) par.appendChild(dkLeaf(c.t,seg));
+      if(!kids) return;
+      var d=dkEl('details'),sm=dkEl('summary',null,seg),box=dkEl('div','dk-kids'),ty=dkKid(c,'.type'),w=dkTyped(c);
+      if(ty&&typeof ty.val==='string') sm.appendChild(dkEl('span','dk-badge',ty.val));
+      d.open=!dkClosed[p];
+      d.addEventListener('toggle',function(){dkClosed[p]=!d.open;});
+      d.appendChild(sm);d.appendChild(box);par.appendChild(d);
+      if(w) box.appendChild(w); else dkRender(box,c,p);
+      /* A tunable PID shows measurement and error live from its telemetry twin. */
+      if(!w&&ty&&ty.val==='PIDController'&&p.indexOf('/Tunables/')===0){
+        var tm=dkFind(p.replace('/Tunables/','/Telemetry/'));
+        if(tm)['measurement','error'].forEach(function(x){var t=dkKid(tm,x);if(t)box.appendChild(dkLeaf(t,x));});
+      }
+    });
+  }
+  function dkFind(path){
+    var n=dkRoot;
+    path.split('/').forEach(function(s){if(s&&n)n=n.k[s];});
+    return n;
+  }
+  /* Rebuilds the tree; waits while an editor has focus so typing is never lost. */
+  function dkBuild(){
+    dkTimer=0;
+    var tree=$id('dkTree'),act=document.activeElement,root={k:dkMap()},ids=Object.keys(dkTopics);
+    if(act&&act!==document.body&&tree.contains(act)&&act.tagName!=='BUTTON'&&act.type!=='checkbox'){dkDirty=true;return;}
+    dkDirty=false;dkRoot=root;
+    ids.forEach(function(id){
+      var t=dkTopics[id],n=root;
+      t.ui=dkNop;
+      t.name.split('/').forEach(function(s){if(s)n=n.k[s]||(n.k[s]={k:dkMap()});});
+      n.t=t;
+    });
+    tree.innerHTML='';
+    dkRender(tree,root,'');
+    ids.forEach(function(id){dkTopics[id].ui();});
+    $id('dkCount').textContent=ids.length+' topic';
+    $id('dkEmpty').hidden=ids.length>0;
+  }
+  $id('dkTree').addEventListener('focusout',function(){if(dkDirty)dkSched();});
 
   /* =========================================================================
      INPUT SOURCES — gamepad / klavye / dokunmatik.
