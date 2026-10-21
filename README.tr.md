@@ -157,7 +157,7 @@ elle renk atama API'si yoktur (LED'in rengi hep bir anlam taşır).
 
 | Renk | Anlam |
 |---|---|
-| Mavi sabit | DS bağlı değil |
+| Mavi sabit | STOPPED, DS bağlı değil (INIT/RUN'da DS olmasa da faz rengi gösterilir) |
 | Mavi yanıp sönüyor | DS bağlı + STOPPED |
 | Sarı sabit | INIT (Auto veya TeleOp), Start bekleniyor |
 | Sarı yanıp sönüyor | TRANSITION: Auto bitti, TeleOp önseçili; Init bekleniyor |

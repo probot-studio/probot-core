@@ -73,6 +73,15 @@ namespace probot::core {
   inline bool isRunPhase(robot::Phase phase) {
     return phase == robot::Phase::AUTO_RUN || phase == robot::Phase::TELEOP_RUN;
   }
+  // INIT or RUN: an OpMode is active and owns a stop hook.
+  inline bool isActivePhase(robot::Phase phase) {
+    return isInitPhase(phase) || isRunPhase(phase);
+  }
+  // OpMode a phase belongs to; TELEOP for phases without an active OpMode.
+  inline OpMode modeOfPhase(robot::Phase phase) {
+    return (phase == robot::Phase::AUTO_INIT || phase == robot::Phase::AUTO_RUN)
+           ? OpMode::AUTO : OpMode::TELEOP;
+  }
   inline bool canSelectMode(robot::Phase phase) {
     return phase == robot::Phase::STOPPED || phase == robot::Phase::TRANSITION;
   }
