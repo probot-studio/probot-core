@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <probot/core/lifecycle.hpp>
 #include <probot/io/gamepad.hpp>
+#include <probot/robot/opmodes.hpp>
 #include <probot/robot/state.hpp>
 
 // Typed, read-only view of the robot and Driver Station state.
@@ -11,6 +12,7 @@
 namespace probot::ds {
 
   using robot::OpMode;
+  using robot::OpModeOption;
   using robot::Phase;
 
   // Latched emergency stop (terminal until reboot).
@@ -26,6 +28,55 @@ namespace probot::ds {
 
   inline OpMode selectedMode() {
     return robot::state().selectedMode();
+  }
+
+  // The OpMode option picked in the Driver Station (an id from
+  // setOpModeOptions()), or 0 when none is listed for the selected mode.
+  // It may change while a run is still ending (autonomous expiry
+  // preselects TeleOp); hooks use activeOpModeId().
+  inline uint64_t selectedOpModeId() {
+    return robot::state().opModeId();
+  }
+
+  // The option the current (or last) run was INITed with; 0 before the
+  // first INIT or when none was selected.
+  inline uint64_t activeOpModeId() {
+    return robot::state().activeOpModeId();
+  }
+
+  // UTILITY can be selected: the sketch defines utilityLoop() or a utility
+  // option is listed.
+  inline bool utilityAvailable() {
+    return __atomic_load_n(&robot::g_utility_hooks, __ATOMIC_SEQ_CST) != 0 ||
+           robot::opModes().hasMode(OpMode::UTILITY);
+  }
+
+  namespace detail {
+    // While idle, moves a selection that is no longer offered to the
+    // preferred option of its mode, or to TeleOp when UTILITY is gone.
+    inline void reconcileSelection() {
+      auto& reg = robot::opModes();
+      auto s = robot::state().read();
+      OpMode mode = s.selectedMode;
+      if (mode == OpMode::UTILITY && !utilityAvailable()) mode = OpMode::TELEOP;
+      OpMode listed;
+      if (mode == s.selectedMode && s.opModeId && reg.find(s.opModeId, &listed) &&
+          listed == mode) return;
+      uint64_t next = reg.preferred(mode);
+      if (mode == s.selectedMode && next == s.opModeId) return;
+      robot::state().replaceSelectionIfIdle((uint32_t)millis(), s.selectedMode, s.opModeId,
+                                            mode, next);
+    }
+  } // namespace detail
+
+  // Replaces the OpMode options the Driver Station offers (at most 64; the
+  // strings are copied). Returns false and keeps the old list when an option
+  // is invalid. While the robot is idle, a selection that is no longer
+  // listed moves to the option preferred() picks; otherwise INIT corrects it.
+  inline bool setOpModeOptions(const OpModeOption* options, size_t count) {
+    if (!robot::opModes().set(options, count)) return false;
+    detail::reconcileSelection();
+    return true;
   }
 
   // Actuators may move: started RUN phase, not stalled, not e-stopped.
@@ -50,8 +101,8 @@ namespace probot::ds {
     return remainingMs > 0 ? (float)remainingMs / 1000.0f : 0.0f;
   }
 
-  // Increments on every DS joystick frame and every accepted mode, INIT,
-  // START or STOP command (not on e-stop or reboot requests).
+  // Increments on every DS joystick frame and every accepted mode, OpMode,
+  // INIT, START or STOP command (not on e-stop or reboot requests).
   inline uint32_t packetSeq() {
     return __atomic_load_n(&robot::g_ds_packet_seq, __ATOMIC_SEQ_CST);
   }

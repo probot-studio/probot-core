@@ -30,6 +30,14 @@ void teleopInitLoop() __attribute__((weak));
 void teleopStart() __attribute__((weak));
 void teleopLoop() PROBOT_REQUIRED_HOOK;
 void teleopStop() PROBOT_REQUIRED_HOOK;
+// UTILITY: a third, optional OpMode for setup and maintenance code (sensor
+// calibration, mechanism homing, tests). The Driver Station offers it only
+// when utilityLoop() is defined or a framework lists a utility option.
+void utilityInit() __attribute__((weak));
+void utilityInitLoop() __attribute__((weak));
+void utilityStart() __attribute__((weak));
+void utilityLoop() __attribute__((weak));
+void utilityStop() __attribute__((weak));
 #undef PROBOT_REQUIRED_HOOK
 
 // [PB-E106] "redefinition of `void robotInit()`" / "robotEnd()": these 0.3.x

@@ -6,6 +6,7 @@
 #include <lwip/sockets.h>
 #include <Arduino.h>
 #include <Preferences.h>
+#include <errno.h>
 #include <DNSServer.h>
 #include <probot/robot/state.hpp>
 #include <probot/core/lifecycle.hpp>
@@ -263,6 +264,7 @@ namespace probot::driverstation::esp32 {
       registerUri("/telemetry",        HTTP_GET,  handleTelemetry);
       registerUri("/health",           HTTP_GET,  handleHealth);
       registerUri("/info",             HTTP_GET,  handleInfo);
+      registerUri("/opmodes",          HTTP_GET,  handleOpModes);
 
 #if PROBOT_CAPTIVE_PORTAL
       // Captive portal: spoofed OS connectivity probes + catch-all DNS
@@ -423,7 +425,7 @@ namespace probot::driverstation::esp32 {
     }
 
     static const char* opModeName(robot::OpMode mode) {
-      return mode == robot::OpMode::AUTO ? "auto" : "teleop";
+      return robot::OpModeRegistry::modeName(mode);
     }
 
     static unsigned batteryDecivolts(const robot::StateSnapshot& s) {
@@ -449,7 +451,8 @@ namespace probot::driverstation::esp32 {
       int n = snprintf(out, out_size,
         "{\"status\":%u,\"phase\":%u,\"selectedMode\":\"%s\",\"autoPeriodSeconds\":%d,"
         "\"autoRemainingMs\":%u,\"batt\":%u.%u,\"rssi\":%d,\"up\":%lu,\"heap\":%lu,\"dm\":%s,"
-        "\"estop\":%s,\"joyAgeMs\":%ld,\"sta\":%ld,\"disc\":%u,\"dashMax\":%lu}",
+        "\"estop\":%s,\"joyAgeMs\":%ld,\"sta\":%ld,\"disc\":%u,\"dashMax\":%lu,"
+        "\"opMode\":\"%llu\",\"omv\":%lu,\"util\":%s}",
         static_cast<unsigned>(s.status),
         static_cast<unsigned>(s.phase),
         opModeName(s.selectedMode),
@@ -464,7 +467,10 @@ namespace probot::driverstation::esp32 {
         joyAge,
         (long)diag::g_sta_count,
         (unsigned)diag::g_last_disc_reason,
-        (unsigned long)probot::dashboard::detail::maxValue());
+        (unsigned long)probot::dashboard::detail::maxValue(),
+        (unsigned long long)s.opModeId,
+        (unsigned long)robot::opModes().version(),
+        ds::utilityAvailable() ? "true" : "false");
       if (n < 0) return 0;
       return ((size_t)n >= out_size) ? out_size - 1 : (size_t)n;
     }
@@ -497,7 +503,7 @@ namespace probot::driverstation::esp32 {
       // second so the frame doubles as the link heartbeat.
       auto s = _rs.read();
       if (s.seq != lastStateSeq || (uint32_t)(now - lastStateSent) >= 1000) {
-        char buf[384];
+        char buf[448];
         buf[0] = 'S';
         size_t n = 1 + buildStateHealthJson(buf + 1, sizeof(buf) - 1, s, now);
         _ws.sendToAll(reinterpret_cast<const uint8_t*>(buf), n);
@@ -796,9 +802,12 @@ namespace probot::driverstation::esp32 {
 
       char cmd[32] = {0};
       char modeVal[12] = {0};
+      char idVal[24] = {0};
       char autoLenVal[8] = {0};
       httpd_query_key_value(query, "cmd", cmd, sizeof(cmd));
       httpd_query_key_value(query, "val", modeVal, sizeof(modeVal));
+      // A truncated id (ESP_ERR_HTTPD_RESULT_TRUNC) must not select its prefix.
+      bool idOk = httpd_query_key_value(query, "id", idVal, sizeof(idVal)) == ESP_OK;
       httpd_query_key_value(query, "autoLen", autoLenVal, sizeof(autoLenVal));
 
       int autoLen = atoi(autoLenVal);
@@ -833,20 +842,44 @@ namespace probot::driverstation::esp32 {
         return ESP_OK;
       };
 
+      static constexpr const char* kStopBeforeMode =
+        "[PB-E409] STOP before changing mode - docs/hatalar#pb-e409";
       uint32_t now = millis();
       if (strcmp(cmd, "mode") == 0) {
-        if (!core::canAcceptModeChange(s.phase, s.status)) return conflict("[PB-E409] STOP before changing mode — docs/hatalar#pb-e409");
+        if (!core::canAcceptModeChange(s.phase, s.status)) return conflict(kStopBeforeMode);
         robot::OpMode mode;
         if (strcmp(modeVal, "auto") == 0) mode = robot::OpMode::AUTO;
         else if (strcmp(modeVal, "teleop") == 0) mode = robot::OpMode::TELEOP;
+        else if (strcmp(modeVal, "utility") == 0 && ds::utilityAvailable()) mode = robot::OpMode::UTILITY;
         else {
-          httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "val must be auto or teleop");
+          httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "val must be auto, teleop or an available utility");
           return ESP_OK;
         }
-        ds->_rs.setSelectedMode(now, mode);
+        if (!ds->_rs.setSelectionIfIdle(now, mode, robot::opModes().preferred(mode)))
+          return conflict(kStopBeforeMode);
+      } else if (strcmp(cmd, "opmode") == 0) {
+        if (!core::canAcceptModeChange(s.phase, s.status)) return conflict(kStopBeforeMode);
+        char* end = nullptr;
+        unsigned long long id = 0;
+        if (idOk && idVal[0] >= '0' && idVal[0] <= '9') {
+          errno = 0;
+          id = strtoull(idVal, &end, 10);
+          if (errno == ERANGE) id = 0;
+        }
+        robot::OpMode mode;
+        if (!id || !end || *end || !robot::opModes().find((uint64_t)id, &mode)) {
+          httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "id is not a listed OpMode");
+          return ESP_OK;
+        }
+        if (!ds->_rs.setSelectionIfIdle(now, mode, (uint64_t)id))
+          return conflict(kStopBeforeMode);
+        robot::opModes().remember(mode, (uint64_t)id);
       } else if (strcmp(cmd, "init") == 0) {
         if (!core::canAcceptInit(s.phase, s.status)) return conflict("[PB-E409] INIT requires STOPPED — docs/hatalar#pb-e409");
         if (autoLen > 0) ds->_rs.setAutoPeriodSeconds(now, autoLen);
+        // The list may have changed during the last run; never INIT an
+        // option that is no longer offered.
+        ds::detail::reconcileSelection();
         ds->_rs.setStatus(now, robot::Status::INIT);
         ds->_rs.setDeadlineMiss(now, false);
       } else if (strcmp(cmd, "start") == 0) {
@@ -926,20 +959,47 @@ namespace probot::driverstation::esp32 {
 
       auto s = ds->_rs.read();
       unsigned battDv = batteryDecivolts(s);
-      char buf[192];
+      char buf[256];
       snprintf(buf, sizeof(buf),
-               "{\"status\":%u,\"phase\":%u,\"selectedMode\":\"%s\",\"autoPeriodSeconds\":%d,\"autoRemainingMs\":%u,\"batt\":%u.%u,\"estop\":%s}",
+               "{\"status\":%u,\"phase\":%u,\"selectedMode\":\"%s\",\"autoPeriodSeconds\":%d,\"autoRemainingMs\":%u,\"batt\":%u.%u,\"estop\":%s,"
+               "\"opMode\":\"%llu\",\"omv\":%lu,\"util\":%s}",
                static_cast<unsigned>(s.status),
                static_cast<unsigned>(s.phase),
                opModeName(s.selectedMode),
                (int)s.autoPeriodSeconds,
                (unsigned)computeAutoRemainingMs(s, millis()),
                battDv / 10, battDv % 10,
-               __atomic_load_n(&probot::robot::g_estop_latched, __ATOMIC_SEQ_CST) ? "true" : "false");
+               __atomic_load_n(&probot::robot::g_estop_latched, __ATOMIC_SEQ_CST) ? "true" : "false",
+               (unsigned long long)s.opModeId,
+               (unsigned long)robot::opModes().version(),
+               ds::utilityAvailable() ? "true" : "false");
 
       httpd_resp_set_type(req, "application/json");
       httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
       return ESP_OK;
+    }
+
+    // OpMode options as JSON (see robot::OpModeRegistry), streamed in chunks
+    // so the registry lock never covers a large copy. A list replaced
+    // mid-response closes the connection; the page refetches when the
+    // "omv" counter of the 'S' frame changes.
+    static esp_err_t handleOpModes(httpd_req_t* req) {
+      auto* ds = self(req);
+      if (!ds->enforceOwner(req)) return ESP_OK;
+
+      auto& reg = robot::opModes();
+      const uint32_t ver = reg.version();
+      char chunk[256];
+      bool stale = false;
+      httpd_resp_set_type(req, "application/json");
+      for (size_t off = 0;;) {
+        size_t n = reg.readJson(ver, off, chunk, sizeof(chunk), &stale);
+        if (stale) return ESP_FAIL;
+        if (!n) break;
+        if (httpd_resp_send_chunk(req, chunk, n) != ESP_OK) return ESP_FAIL;
+        off += n;
+      }
+      return httpd_resp_send_chunk(req, nullptr, 0);
     }
 
     static esp_err_t handleGetBattery(httpd_req_t* req) {

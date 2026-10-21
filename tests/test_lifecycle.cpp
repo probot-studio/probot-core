@@ -26,13 +26,20 @@ namespace {
   void h_teleopStart()    { g_calls.push_back("teleopStart"); }
   void h_teleopLoop()     { g_calls.push_back("teleopLoop"); }
   void h_teleopStop()     { g_calls.push_back("teleopStop"); }
+  void h_utilInit()       { g_calls.push_back("utilityInit"); }
+  void h_utilInitLoop()   { g_calls.push_back("utilityInitLoop"); }
+  void h_utilStart()      { g_calls.push_back("utilityStart"); }
+  void h_utilLoop()       { g_calls.push_back("utilityLoop"); }
+  void h_utilStop()       { g_calls.push_back("utilityStop"); }
   void h_neutralize()     { ++g_neutralized; }
   uint32_t h_clockNow()    { return g_clock_now; }
 
   core::Hooks mkHooks(){
     return core::Hooks{ h_autoInit, h_autoInitLoop, h_autoStart, h_autoLoop,
                         h_autoStop, h_teleopInit, h_teleopInitLoop,
-                        h_teleopStart, h_teleopLoop, h_teleopStop };
+                        h_teleopStart, h_teleopLoop, h_teleopStop,
+                        h_utilInit, h_utilInitLoop, h_utilStart, h_utilLoop,
+                        h_utilStop };
   }
 }
 
@@ -209,6 +216,7 @@ TEST_CASE(stall_heartbeat_gives_one_shot_hooks_the_hook_budget){
   robot::StateService rs;
   core::PhaseMachine m;
   core::Hooks h{ hb_init, hb_initLoop, hb_start, hb_loop, hb_stop,
+                 hb_init, hb_initLoop, hb_start, hb_loop, hb_stop,
                  hb_init, hb_initLoop, hb_start, hb_loop, hb_stop };
   volatile uint32_t hb = 500;
   g_hb = &hb;
@@ -280,4 +288,70 @@ TEST_CASE(framework_cycle_wraps_every_stage_with_fresh_heartbeats){
   EXPECT_TRUE(hb == 300u);
   g_hb = nullptr;
   g_clock_now = 0;
+}
+
+TEST_CASE(utility_runs_its_own_hooks_and_phases){
+  g_calls.clear();
+  robot::StateService rs;
+  core::PhaseMachine m;
+  auto h = mkHooks();
+
+  m.step(h, {OpMode::UTILITY, Stage::INIT}, rs, 100, h_neutralize);
+  EXPECT_TRUE(rs.read().phase == robot::Phase::UTILITY_INIT);
+  EXPECT_TRUE(core::isInitPhase(robot::Phase::UTILITY_INIT));
+  m.step(h, {OpMode::UTILITY, Stage::RUN}, rs, 120, h_neutralize);
+  EXPECT_TRUE(rs.read().phase == robot::Phase::UTILITY_RUN);
+  EXPECT_TRUE(core::isRunPhase(robot::Phase::UTILITY_RUN));
+  EXPECT_TRUE(core::modeOfPhase(robot::Phase::UTILITY_RUN) == OpMode::UTILITY);
+  m.step(h, {OpMode::UTILITY, Stage::STOPPED}, rs, 140, h_neutralize);
+  EXPECT_TRUE(rs.read().phase == robot::Phase::STOPPED);
+
+  const std::vector<std::string> expected{
+    "utilityInit", "utilityInitLoop", "utilityStart", "utilityLoop", "utilityStop"
+  };
+  EXPECT_TRUE(g_calls == expected);
+}
+
+TEST_CASE(utility_run_enables_inputs_and_has_no_match_timer){
+  robot::StateService rs;
+  rs.setControl(1u, robot::Status::START, OpMode::UTILITY);
+  rs.setPhase(1u, robot::Phase::UTILITY_RUN);
+  rs.setAutoStartMs(1u, 1u);
+  EXPECT_TRUE(core::inputsEnabled(rs.read()));
+
+  // The autonomous period never ends a UTILITY run.
+  core::Supervisor sup;
+  auto d = sup.update(rs, 1u + 3600u * 1000u, false);
+  EXPECT_TRUE(d.mode == OpMode::UTILITY && d.stage == Stage::RUN);
+}
+
+TEST_CASE(autonomous_expiry_selects_the_preferred_teleop_opmode){
+  auto& reg = robot::opModes();
+  reg.resetForTest();
+  const robot::OpModeOption opts[] = {
+    {11, OpMode::AUTO, "Left", "", ""},
+    {21, OpMode::TELEOP, "Drive", "", ""},
+    {22, OpMode::TELEOP, "Drive slow", "", ""},
+  };
+  EXPECT_TRUE(reg.set(opts, 3));
+  reg.remember(OpMode::TELEOP, 22);
+
+  robot::StateService rs;
+  rs.setSelection(5u, OpMode::AUTO, 11);
+  rs.setStatus(5u, robot::Status::INIT);
+  rs.setStatus(10u, robot::Status::START);
+  rs.setPhase(10u, robot::Phase::AUTO_RUN);
+  rs.setAutoPeriodSeconds(10u, 1);
+  rs.setAutoStartMs(10u, 10u);
+
+  core::Supervisor sup;
+  auto d = sup.update(rs, 1010u, false);
+  EXPECT_TRUE(d.mode == OpMode::TELEOP && d.stage == Stage::TRANSITION);
+  auto s = rs.read();
+  EXPECT_TRUE(s.selectedMode == OpMode::TELEOP);
+  EXPECT_TRUE(s.opModeId == 22);
+  EXPECT_TRUE(s.activeOpModeId == 11);   // the ending run still reports its option
+  rs.setStatus(1020u, robot::Status::INIT);
+  EXPECT_TRUE(rs.activeOpModeId() == 22);
+  reg.resetForTest();
 }

@@ -10,6 +10,7 @@ Joystick	KEYWORD1
 Servo	KEYWORD1
 GamepadService	KEYWORD1
 StateService	KEYWORD1
+OpModeOption	KEYWORD1
 
 #######################################
 # Functions (KEYWORD2)
@@ -24,6 +25,15 @@ teleopInitLoop	KEYWORD2
 teleopStart	KEYWORD2
 teleopLoop	KEYWORD2
 teleopStop	KEYWORD2
+utilityInit	KEYWORD2
+utilityInitLoop	KEYWORD2
+utilityStart	KEYWORD2
+utilityLoop	KEYWORD2
+utilityStop	KEYWORD2
+setOpModeOptions	KEYWORD2
+selectedOpModeId	KEYWORD2
+activeOpModeId	KEYWORD2
+utilityAvailable	KEYWORD2
 makeDefault	KEYWORD2
 getLeftX	KEYWORD2
 getLeftY	KEYWORD2

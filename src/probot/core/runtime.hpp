@@ -136,7 +136,12 @@ namespace probot {
         orEmpty(&::teleopInitLoop),
         orEmpty(&::teleopStart),
         orEmpty(&::teleopLoop),
-        orEmpty(&::teleopStop)
+        orEmpty(&::teleopStop),
+        orEmpty(&::utilityInit),
+        orEmpty(&::utilityInitLoop),
+        orEmpty(&::utilityStart),
+        orEmpty(&::utilityLoop),
+        orEmpty(&::utilityStop)
       };
     }
 
@@ -180,7 +185,7 @@ namespace probot {
       if (g_framework.emergencyStop) g_framework.emergencyStop();
       if (__atomic_load_n(&g_estop_call_stop, __ATOMIC_SEQ_CST)) {
         OpMode mode = (OpMode)__atomic_load_n(&g_estop_stop_mode, __ATOMIC_SEQ_CST);
-        (mode == OpMode::AUTO ? orEmpty(&::autonomousStop) : orEmpty(&::teleopStop))();
+        orEmpty(core::pick(mode, &::autonomousStop, &::teleopStop, &::utilityStop))();
       }
       __atomic_store_n(&g_estop_stop_done, 1u, __ATOMIC_SEQ_CST);
       vTaskSuspend(NULL);
@@ -360,6 +365,8 @@ namespace probot {
     // TU happens to construct the services.
     probot::io::gamepad().setTimeoutMs(PROBOT_INPUT_TIMEOUT_MS);
     probot::io::rawGamepad().setTimeoutMs(PROBOT_INPUT_TIMEOUT_MS);
+    __atomic_store_n(&probot::robot::g_utility_hooks,
+                     detail::orEmpty(&::utilityLoop) != &detail::emptyHook ? 1u : 0u, __ATOMIC_SEQ_CST);
     probot::dashboard::detail::configure({ PROBOT_DASH_MAX_TOPICS, PROBOT_DASH_MAX_SCHEMAS,
                                            PROBOT_DASH_MAX_VALUE, PROBOT_DASH_POOL_BYTES,
                                            PROBOT_DASH_WRITE_QUEUE });

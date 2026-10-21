@@ -18,6 +18,9 @@ Rules that generated code MUST follow:
   INIT and START with neutral input; `autonomousStart`/`teleopStart` run once
   at START. Do not put these in beginner examples unless their purpose is
   needed.
+- Optional third mode for setup/maintenance code (calibration, homing):
+  `utilityInit/InitLoop/Start/Loop/Stop`. The DS offers Utility only when
+  `utilityLoop()` is defined. It has no timer. Use it only when asked.
 - Define `PROBOT_WIFI_AP_SSID`, `PROBOT_WIFI_AP_PASSWORD` (min 8 chars)
   and `PROBOT_WIFI_AP_CHANNEL` (1-13) BEFORE `#include <probot.h>`. For
   a fleet, give each robot a distinct fixed channel by hand. Boot-time

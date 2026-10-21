@@ -266,6 +266,7 @@ const char MAIN_page[] PROGMEM = R"=====(
     .wpl-mode.on{background:#fff;color:var(--ink);border-color:var(--line);box-shadow:0 1px 0 var(--line);}
     .wpl-mode .rdot{width:12px;height:12px;border-radius:50%;border:2px solid #c9beb4;flex:none;}
     .wpl-mode.on .rdot{border-color:var(--orange-600);background:var(--orange-600);box-shadow:inset 0 0 0 2.5px #fff;}
+    .wpl-om{margin-top:2px;padding:6px 8px;font:700 0.82rem var(--font);}
     .wpl-actions{display:flex;flex-direction:column;gap:7px;}
     .wpl-en,.wpl-dis{flex:1;border-radius:8px;font:800 0.95rem var(--font);letter-spacing:0.08em;text-transform:uppercase;}
     .btn.wpl-en{background:var(--green);color:#fff;border:1px solid var(--green-deep);box-shadow:0 2px 0 var(--green-deep);}
@@ -785,6 +786,8 @@ const char MAIN_page[] PROGMEM = R"=====(
                 <div class="wpl-modes" id="mcModes">
                   <label class="wpl-mode" data-mode="auto"><span class="rdot"></span>Autonomous</label>
                   <label class="wpl-mode on" data-mode="teleop"><span class="rdot"></span>Teleoperated</label>
+                  <label class="wpl-mode" data-mode="utility" hidden><span class="rdot"></span>Utility</label>
+                  <select id="mcOpMode" class="wpl-om" aria-label="OpMode" hidden></select>
                 </div>
                 <div class="wpl-actions">
                   <button id="mcEnable" class="btn wpl-en" disabled>Init</button>
@@ -1017,6 +1020,7 @@ const char MAIN_page[] PROGMEM = R"=====(
       <div class="drv-modes" id="drvModes">
         <button class="drv-mode" data-mode="auto">Auto</button>
         <button class="drv-mode on" data-mode="teleop">Teleop</button>
+        <button class="drv-mode" data-mode="utility" hidden>Utility</button>
       </div>
       <button class="drv-init" id="drvInit" disabled>Init</button>
       <button class="drv-stop" id="drvStop" disabled>STOP</button>
@@ -1140,6 +1144,10 @@ const char MAIN_page[] PROGMEM = R"=====(
   var currentPhase=0;
   var currentStatus=2;
   var selectedMode='teleop';
+  /* Phases: 1/3/6 INIT, 2/4/7 RUN of auto/teleop/utility; 0 STOPPED, 5 TRANSITION. */
+  function phInit(p){return p===1||p===3||p===6;}
+  function phRun(p){return p===2||p===4||p===7;}
+  var MODE_NAME={auto:'Autonomous',teleop:'Teleoperated',utility:'Utility'};
   var estopped=false;
 
   var PHASES={
@@ -1149,6 +1157,8 @@ const char MAIN_page[] PROGMEM = R"=====(
     auto      :{label:'Autonomous', sub:'Running script',                color:'#FF4500', soft:'rgba(255,69,0,0.10)'},
     teleop    :{label:'Teleop',     sub:'Drivers in control',            color:'#28a745', soft:'rgba(40,167,69,0.10)'},
     transition:{label:'Transition', sub:'Auto bitti — TeleOp için Init', color:'#FFB020', soft:'rgba(255,176,32,0.12)'},
+    utilityInit:{label:'Utility Init',sub:'initLoop çalışıyor, Start bekleniyor', color:'#FFB020', soft:'rgba(255,176,32,0.12)'},
+    utility   :{label:'Utility',    sub:'Bakım / ayar kodu çalışıyor',   color:'#8e24aa', soft:'rgba(142,36,170,0.10)'},
     stopped   :{label:'Stopped',    sub:'Motors safe',                   color:'#d93025', soft:'rgba(217,48,37,0.10)'}
   };
   var phaseTile=$id('phaseTile');
@@ -1198,10 +1208,10 @@ const char MAIN_page[] PROGMEM = R"=====(
     $id('matchClock').textContent=pad2(m)+':'+pad2(ss);
   },250);
   function clockOnPhase(prev,next){
-    if((next===1||next===3)&&prev===0){
+    if(phInit(next)&&prev===0){
       matchRunning=false;matchStart=0;
       $id('matchClock').textContent='00:00';
-    }else if(next===2||next===4){
+    }else if(phRun(next)){
       if(!matchRunning){matchRunning=true;matchStart=Date.now();}
     }else if(next===0){
       matchRunning=false;
@@ -1210,7 +1220,7 @@ const char MAIN_page[] PROGMEM = R"=====(
   }
 
   /* ---- STATE RENDER ---- */
-  var PHASE_EVENT=['Stopped','Auto Init','Autonomous','TeleOp Init','TeleOp','Transition'];
+  var PHASE_EVENT=['Stopped','Auto Init','Autonomous','TeleOp Init','TeleOp','Transition','Utility Init','Utility'];
   function applyState(data){
     if(!data) return;
 
@@ -1228,7 +1238,10 @@ const char MAIN_page[] PROGMEM = R"=====(
     var prevPhase=currentPhase;
     currentPhase=typeof data.phase==='number'?data.phase:0;
     currentStatus=typeof data.status==='number'?data.status:currentStatus;
-    selectedMode=data.selectedMode==='auto'?'auto':'teleop';
+    selectedMode=MODE_NAME[data.selectedMode]?data.selectedMode:'teleop';
+    if(typeof data.opMode==='string') omSel=data.opMode;
+    utilAvail=data.util===true;
+    if(typeof data.omv==='number'&&data.omv!==omVer) omFetch(data.omv);
 
     if(currentPhase!==prevPhase){
       evlog('info','Phase: '+(PHASE_EVENT[currentPhase]||currentPhase));
@@ -1267,6 +1280,12 @@ const char MAIN_page[] PROGMEM = R"=====(
     }else if(currentPhase===5){
       stopAutoTimer();
       setPhase('transition');
+    }else if(currentPhase===6){
+      stopAutoTimer();
+      setPhase('utilityInit');
+    }else if(currentPhase===7){
+      stopAutoTimer();
+      setPhase('utility');
     }else{
       stopAutoTimer();
       setPhase('standby');
@@ -1279,8 +1298,8 @@ const char MAIN_page[] PROGMEM = R"=====(
 
   /* ---- MATCH CONTROL render + komutlar ---- */
   function renderMC(){
-    var inInit=(currentPhase===1||currentPhase===3);
-    var inRun=(currentPhase===2||currentPhase===4);
+    var inInit=phInit(currentPhase);
+    var inRun=phRun(currentPhase);
     var modeUnlocked=(currentPhase===0||currentPhase===5);
     var modeSelectable=modeUnlocked&&currentStatus===2; // firmware: mode yalnız STOP'ta
 
@@ -1289,11 +1308,13 @@ const char MAIN_page[] PROGMEM = R"=====(
     document.querySelectorAll('#mcModes .wpl-mode').forEach(function(m){
       m.classList.toggle('on',m.dataset.mode===selectedMode);
     });
+    document.querySelectorAll('[data-mode="utility"]').forEach(function(m){m.hidden=!utilAvail&&selectedMode!=='utility';});
+    renderOpModes(modeSelectable);
 
     var en=$id('mcEnable');
     if(modeUnlocked){
       en.textContent=(currentPhase===5)
-        ?(selectedMode==='auto'?'Init Auto':'Init Teleop')
+        ?(selectedMode==='auto'?'Init Auto':selectedMode==='utility'?'Init Utility':'Init Teleop')
         :'Init';
       en.disabled=(currentStatus!==2); // INIT yalnız STOP durumunda kabul edilir
     }else if(inInit){
@@ -1340,13 +1361,61 @@ const char MAIN_page[] PROGMEM = R"=====(
       if(!r.ok) return r.text().then(function(t){throw new Error(r.status+' '+t);});
       selectedMode=mode;
       renderMC();
-      evlog('info','Mod: '+(mode==='auto'?'Autonomous':'Teleoperated'));
+      evlog('info','Mod: '+MODE_NAME[mode]);
       setTimeout(fetchState,80);
     }).catch(function(err){
       evlog('warn','Mod değişmedi: '+err.message);
       fetchState();
     });
   }
+  /* ---- OpMode list: GET /opmodes when the 'S' counter "omv" changes ---- */
+  var omVer=-1,omList=[],omSel='0',omBusy=false,utilAvail=false;
+  function omFetch(v){
+    if(omBusy) return;
+    omBusy=true;
+    var ac=new AbortController();
+    var tid=setTimeout(function(){ac.abort();},3000);
+    fetch('/opmodes',{signal:ac.signal}).then(function(r){if(!r.ok)throw 0;return r.json();}).then(function(j){
+      omList=Array.isArray(j.options)?j.options:[];omVer=v;renderMC();
+    }).catch(function(){}).then(function(){clearTimeout(tid);omBusy=false;});
+  }
+  function renderOpModes(selectable){
+    var sel=$id('mcOpMode'),opts=omList.filter(function(o){return o.mode===selectedMode;});
+    var key=selectedMode+'|'+omVer;
+    sel.hidden=!opts.length;
+    if(sel.dkKey!==key){
+      sel.dkKey=key;sel.innerHTML='';
+      var groups={};
+      opts.forEach(function(o){
+        var par=sel;
+        if(o.group){
+          par=groups['g'+o.group];
+          if(!par){par=groups['g'+o.group]=document.createElement('optgroup');par.label=o.group;sel.appendChild(par);}
+        }
+        var op=document.createElement('option');
+        op.value=o.id;op.textContent=o.name;if(o.description)op.title=o.description;
+        par.appendChild(op);
+      });
+    }
+    sel.disabled=!selectable;
+    if(document.activeElement!==sel) sel.value=omSel;
+  }
+  $id('mcOpMode').addEventListener('change',function(){
+    var sel=this,id=sel.value,ac=new AbortController();
+    var name=sel.selectedIndex>=0?sel.options[sel.selectedIndex].textContent:id;
+    var tid=setTimeout(function(){ac.abort();},3000);
+    sel.blur();
+    fetch('/robotControl?cmd=opmode&id='+encodeURIComponent(id),{signal:ac.signal}).then(function(r){
+      clearTimeout(tid);
+      if(!r.ok) return r.text().then(function(t){throw new Error(r.status+' '+t);});
+      omSel=id;
+      evlog('info','OpMode: '+name);
+      setTimeout(fetchState,80);
+    }).catch(function(err){
+      evlog('warn','OpMode değişmedi: '+err.message);
+      fetchState();
+    });
+  });
   function sendSimpleCmd(cmd){
     var ac=new AbortController();
     var tid=setTimeout(function(){ac.abort();},3000);
@@ -1362,7 +1431,7 @@ const char MAIN_page[] PROGMEM = R"=====(
   });
   $id('mcEnable').addEventListener('click',function(){
     if(currentPhase===0||currentPhase===5) sendMatchCommand('init');
-    else if(currentPhase===1||currentPhase===3) sendMatchCommand('start');
+    else if(phInit(currentPhase)) sendMatchCommand('start');
   });
   $id('mcDisable').addEventListener('click',function(){sendMatchCommand('stop');});
 
@@ -1626,8 +1695,8 @@ const char MAIN_page[] PROGMEM = R"=====(
 
     if(estopped) setLight('lightCode','bad','E-Stop');
     else if(lastDm) setLight('lightCode','bad','Stalled');
-    else if(currentPhase===2||currentPhase===4) setLight('lightCode','ok','Running');
-    else if(currentPhase===1||currentPhase===3) setLight('lightCode','ok','Init');
+    else if(phRun(currentPhase)) setLight('lightCode','ok','Running');
+    else if(phInit(currentPhase)) setLight('lightCode','ok','Init');
     else if(currentPhase===5) setLight('lightCode','warn','Waiting');
     else setLight('lightCode','ok','Ready');
 
@@ -2436,7 +2505,7 @@ const char MAIN_page[] PROGMEM = R"=====(
   $id('driveCloseBtn').addEventListener('click',closeDrive);
   $id('drvInit').addEventListener('click',function(){
     if(currentPhase===0||currentPhase===5) sendMatchCommand('init');
-    else if(currentPhase===1||currentPhase===3) sendMatchCommand('start');
+    else if(phInit(currentPhase)) sendMatchCommand('start');
   });
   $id('drvStop').addEventListener('click',function(){sendMatchCommand('stop');});
   $id('drvEstop').addEventListener('click',doEstop);

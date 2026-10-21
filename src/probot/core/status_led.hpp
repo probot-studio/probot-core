@@ -22,6 +22,7 @@ namespace probot::core {
         return blinkOn ? Rgb{0, 0, 255} : off;
       case robot::Phase::AUTO_INIT:
       case robot::Phase::TELEOP_INIT:
+      case robot::Phase::UTILITY_INIT:
         return {255, 255, 0};                              // solid yellow
       case robot::Phase::TRANSITION:
         return blinkOn ? Rgb{255, 255, 0} : off;           // blinking yellow
@@ -29,6 +30,8 @@ namespace probot::core {
         return blinkOn ? Rgb{255, 128, 0} : off;           // blinking orange
       case robot::Phase::TELEOP_RUN:
         return blinkOn ? Rgb{0, 255, 0} : off;             // blinking green
+      case robot::Phase::UTILITY_RUN:
+        return blinkOn ? Rgb{160, 0, 255} : off;           // blinking purple
     }
     return off;
   }

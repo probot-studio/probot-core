@@ -201,15 +201,16 @@ always carries a meaning.
 |---|---|
 | Solid blue | STOPPED, DS not connected (in INIT/RUN the phase color is shown even without a DS) |
 | Blinking blue | DS connected + STOPPED |
-| Solid yellow | INIT (Auto or TeleOp), waiting for Start |
+| Solid yellow | INIT (Auto, TeleOp or Utility), waiting for Start |
 | Blinking yellow | TRANSITION: Auto finished, TeleOp preselected; waiting for Init |
 | Blinking orange | AUTO_RUN |
 | Blinking green | TELEOP_RUN |
+| Blinking purple | UTILITY_RUN (setup and maintenance mode, see API.md) |
 | Blinking red | Stalled: a loop took longer than 2 s, being held safe |
 | Solid red | Emergency stop (latched, reboot required) |
 
 **RSL (robot signal light):** if you `#define PROBOT_RSL_PIN <gpio>`, the
-library blinks that digital pin only in AUTO_RUN/TELEOP_RUN, and keeps it
+library blinks that digital pin only in AUTO_RUN/TELEOP_RUN/UTILITY_RUN, and keeps it
 **solid on** in INIT, STOPPED, TRANSITION and E-stop.
 
 ## Battery measurement
