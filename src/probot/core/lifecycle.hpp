@@ -91,8 +91,10 @@ namespace probot::core {
   inline bool canAcceptStart(robot::Phase phase, robot::Status status) {
     return isInitPhase(phase) && status == robot::Status::INIT;
   }
-  inline bool canAcceptStop(robot::Phase phase) {
-    return isInitPhase(phase) || isRunPhase(phase);
+  // STOP is also accepted while an accepted INIT/START has not yet been
+  // published as a phase, so an immediate abort is never rejected.
+  inline bool canAcceptStop(robot::Phase phase, robot::Status status) {
+    return isInitPhase(phase) || isRunPhase(phase) || status != robot::Status::STOP;
   }
 
   class PhaseMachine {
