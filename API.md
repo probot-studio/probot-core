@@ -423,7 +423,7 @@ drainWrites([](const Write& w, void*) {
 | `unpublish(id)` | Topic'i kaldırır (DS'e `'R'`) |
 | `set(id, data, len)` | Değeri kopyalar; aynıysa düşer (`KEEP_DUPLICATES` hariç) |
 | `setProperties(id, json)` / `setFlags(id, flags)` | Yeniden duyurur |
-| `addSchema(name, type, data, len)` / `hasSchema(name)` | `struct:X` şemaları |
+| `addSchema(name, type, data, len)` / `hasSchema(name)` | `struct:X` ve `proto:X` şemaları; en çok `PROBOT_DASH_MAX_SCHEMA_BYTES`, havuzdan (`PROBOT_DASH_POOL_BYTES`) yer alır. Sığmazsa `false` |
 | `drainWrites(fn, ctx)` | DS yazmalarını sırayla `fn`'e verir; `data` yalnız `fn` içinde geçerli. Tek bir task'tan çağırın |
 | `rejectWrite(id, reason)` | DS'e `'K'` reddi gönderir |
 | `stats()` | topic sayısı, bayt kullanımı, düşürülenler |
@@ -477,7 +477,8 @@ Yaşam döngüsü / güvenlik makroları:
 | `PROBOT_FRAMEWORK` | tanımsız | Tanımlıysa OpMode hook'larının hepsi isteğe bağlı (framework katmanı için) |
 | `PROBOT_DASH_MAX_TOPICS` | 128 | Dashboard topic sayısı (1-255, PB-E108) |
 | `PROBOT_DASH_MAX_SCHEMAS` | 32 | Şema sayısı (0-255) |
-| `PROBOT_DASH_MAX_VALUE` | 1024 | Değer / özellik / şema başına bayt (16-16384, PB-E108) |
+| `PROBOT_DASH_MAX_VALUE` | 1024 | Değer / özellik başına bayt (16-16384, PB-E108) |
+| `PROBOT_DASH_MAX_SCHEMA_BYTES` | 4096 | Şema başına bayt (16-32768, PB-E108); protobuf tanımları bir değerden büyük olabilir |
 | `PROBOT_DASH_POOL_BYTES` | 32768 | Ad, tip, özellik, değer ve şemalar için toplam bayt |
 | `PROBOT_DASH_WRITE_QUEUE` | 2048 | Bekleyen DS yazmaları için bayt |
 | `PROBOT_DASH_PERIOD_MS` | 50 | Dashboard gönderim periyodu (10-250) |
@@ -500,7 +501,7 @@ zamanı · **E4xx** protokol/HTTP (E409, HTTP 409'un karşılığıdır).
 | PB-E105 | Derleme | Batarya kaynak çakışması/geçersiz seçim — hem `PROBOT_BATTERY_ADC_PIN` hem `PROBOT_BATTERY_INA` tanımlı; ya da `_INA` 219/226 değil; ya da `_TRIM` 0.5-2.0 dışında |
 | PB-E106 | Derleme | `redefinition of void robotInit()` / `robotEnd()`: 0.3.x hook'ları 0.4.0'da kaldırıldı; kurulum kodunu `teleopInit()`/`autonomousInit()`'e, güvenli durdurmayı `teleopStop()`/`autonomousStop()`'a taşıyın |
 | PB-E107 | Derleme | `PROBOT_USER_STACK` 4096 bayttan küçük |
-| PB-E108 | Derleme | Dashboard sınırı geçersiz: `PROBOT_DASH_MAX_TOPICS` 1-255, `PROBOT_DASH_MAX_SCHEMAS` 0-255, `PROBOT_DASH_MAX_VALUE` 16-16384, `PROBOT_DASH_PERIOD_MS` 10-250 dışında |
+| PB-E108 | Derleme | Dashboard sınırı geçersiz: `PROBOT_DASH_MAX_TOPICS` 1-255, `PROBOT_DASH_MAX_SCHEMAS` 0-255, `PROBOT_DASH_MAX_VALUE` 16-16384, `PROBOT_DASH_MAX_SCHEMA_BYTES` 16-32768, `PROBOT_DASH_PERIOD_MS` 10-250 dışında |
 | PB-E109 | Derleme | `USER_LOOP_PERIOD_MS` 1-1000 ms dışında |
 | PB-E110 | Derleme | `PROBOT_CONSOLE_BYTES` 2048-65536 dışında |
 | PB-E201 | Bağlama | Zorunlu hook tanımsız — `undefined reference to teleopLoop()` vb. Dördü de (boş olsa bile) tanımlanmalı |

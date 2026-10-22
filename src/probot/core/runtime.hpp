@@ -30,6 +30,9 @@
 #ifndef PROBOT_DASH_MAX_VALUE
 #define PROBOT_DASH_MAX_VALUE 1024
 #endif
+#ifndef PROBOT_DASH_MAX_SCHEMA_BYTES
+#define PROBOT_DASH_MAX_SCHEMA_BYTES 4096
+#endif
 #ifndef PROBOT_DASH_POOL_BYTES
 #define PROBOT_DASH_POOL_BYTES 32768
 #endif
@@ -42,6 +45,8 @@ static_assert(PROBOT_DASH_MAX_TOPICS >= 1 && PROBOT_DASH_MAX_TOPICS <= 255,
               "[PB-E108] PROBOT_DASH_MAX_TOPICS must be 1-255. Docs: probotstudio.com/docs/hatalar/#pb-e108");
 static_assert(PROBOT_DASH_MAX_VALUE >= 16 && PROBOT_DASH_MAX_VALUE <= 16384,
               "[PB-E108] PROBOT_DASH_MAX_VALUE must be 16-16384 bytes. Docs: probotstudio.com/docs/hatalar/#pb-e108");
+static_assert(PROBOT_DASH_MAX_SCHEMA_BYTES >= 16 && PROBOT_DASH_MAX_SCHEMA_BYTES <= 32768,
+              "[PB-E108] PROBOT_DASH_MAX_SCHEMA_BYTES must be 16-32768 bytes. Docs: probotstudio.com/docs/hatalar/#pb-e108");
 
 // Robot console ring (probot/telemetry/console.hpp), taken from the heap.
 #ifndef PROBOT_CONSOLE_BYTES
@@ -390,7 +395,7 @@ namespace probot {
                      detail::orEmpty(&::utilityLoop) != &detail::emptyHook ? 1u : 0u, __ATOMIC_SEQ_CST);
     probot::dashboard::detail::configure({ PROBOT_DASH_MAX_TOPICS, PROBOT_DASH_MAX_SCHEMAS,
                                            PROBOT_DASH_MAX_VALUE, PROBOT_DASH_POOL_BYTES,
-                                           PROBOT_DASH_WRITE_QUEUE });
+                                           PROBOT_DASH_WRITE_QUEUE, PROBOT_DASH_MAX_SCHEMA_BYTES });
     // Before the Driver Station starts: reserve() moves the records, which
     // restarts any reader from the oldest line.
     if (!probot::console::detail::reserve(PROBOT_CONSOLE_BYTES)) {

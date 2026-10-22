@@ -11,7 +11,7 @@ using dash::ValueType;
 
 namespace {
   dash::Limits limits(uint32_t pool = 32768, uint32_t queue = 2048, uint16_t topics = 16){
-    return dash::Limits{ topics, 4, 1024, pool, queue };
+    return dash::Limits{ topics, 4, 1024, pool, queue, 4096 };
   }
 
   void fresh(dash::Limits lim = limits()){
@@ -325,5 +325,34 @@ TEST_CASE(dashboard_republish_does_not_reuse_the_same_slot_first){
   next();                                                   // 'R' frees the slot
   TopicId b = dash::publish("/T/a", ValueType::Boolean, "boolean", nullptr, 0);
   EXPECT_TRUE((b & 0xFF) != (a & 0xFF));
+  dash::detail::resetForTest();
+}
+
+TEST_CASE(dashboard_schemas_have_their_own_size_limit_counted_in_the_pool){
+  dash::Limits lim = limits();
+  lim.maxValue = 256;
+  lim.maxSchemaBytes = 2048;
+  fresh(lim);
+  std::vector<uint8_t> desc(1300, 0x0A);          // a protobuf descriptor, larger than a value
+  uint32_t before = dash::stats().bytesUsed;
+  EXPECT_TRUE(dash::addSchema("proto:wpi.proto.ProtobufPose2d", "proto:FileDescriptorProto",
+                              desc.data(), desc.size()));
+  EXPECT_TRUE(dash::stats().bytesUsed >= before + desc.size());
+  std::vector<uint8_t> big(2049, 1);
+  EXPECT_TRUE(!dash::addSchema("proto:too.big", "proto:FileDescriptorProto", big.data(), big.size()));
+
+  // The push buffer is sized for the largest schema frame.
+  size_t cap = dash::detail::frameCapacity();
+  EXPECT_TRUE(cap >= 1 + 1 + 255 + 1 + 255 + 2 + 2048);
+  std::vector<uint8_t> buf(cap);
+  size_t n = dash::detail::buildFrame(buf.data(), buf.size(), 0);
+  EXPECT_TRUE(n > desc.size() && buf[0] == 'C');
+  EXPECT_TRUE(u16(buf, n - desc.size() - 2) == desc.size());
+
+  // Still counted in the pool: a pool too small for the schema refuses it.
+  lim.poolBytes = 1024;
+  fresh(lim);
+  EXPECT_TRUE(!dash::addSchema("proto:wpi.proto.ProtobufPose2d", "proto:FileDescriptorProto",
+                               desc.data(), desc.size()));
   dash::detail::resetForTest();
 }
