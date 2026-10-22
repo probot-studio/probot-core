@@ -90,8 +90,19 @@ Biçim [Keep a Changelog](https://keepachangelog.com/), sürümler
   working; bytes after the buttons that are not a valid value trailer now
   drop the frame. Client frames other than `'W'` may now be 68 bytes (was
   47). `ds::packetSeq()` counts every port's frames.
+- Robot console: `probot::console::info/warning/error(fmt, ...)`,
+  `write(level, text, len)` and `print(level, text)` keep leveled lines in
+  a ring of `PROBOT_CONSOLE_BYTES` (default 4096, 2048-65536, PB-E110);
+  the Driver Station shows them in a Robot Console card on the Logs page
+  and counts unread warnings and errors on the Logs tab. Lines survive
+  across loops (unlike the telemetry panel) and `printf`-style lines may be
+  512 bytes; `write()` splits longer text. Protocol: new `'L'` push frame;
+  `'Q'` also re-sends the console. PB-E307 when the ring cannot be
+  allocated.
 
 ### Changed
+- `probot::printf` can fill the whole 256-byte telemetry panel in one call
+  (it used to stop at 127 characters).
 - `probot::emergencyStop()` moved to `robot/state.hpp` and
   `probot::io::gamepad()` to `io/gamepad.hpp` so both are config-free.
   `PROBOT_INPUT_TIMEOUT_MS` is now applied in `runtime_setup()`, so it

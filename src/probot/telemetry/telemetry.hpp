@@ -73,7 +73,7 @@ inline void println(const char* msg = "") {
 }
 
 inline void printf(const char* fmt, ...) {
-  char tmp[128];
+  char tmp[detail::BUFFER_SIZE];   // the whole panel
   va_list args;
   va_start(args, fmt);
   vsnprintf(tmp, sizeof(tmp), fmt, args);
@@ -138,7 +138,7 @@ namespace probot {
   inline void println(const char* msg = "") { telemetry::println(msg); }
   inline void printf(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
   inline void printf(const char* fmt, ...) {
-    char tmp[128];
+    char tmp[telemetry::detail::BUFFER_SIZE];   // the whole panel
     va_list args;
     va_start(args, fmt);
     vsnprintf(tmp, sizeof(tmp), fmt, args);

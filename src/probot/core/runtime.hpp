@@ -43,6 +43,13 @@ static_assert(PROBOT_DASH_MAX_TOPICS >= 1 && PROBOT_DASH_MAX_TOPICS <= 255,
 static_assert(PROBOT_DASH_MAX_VALUE >= 16 && PROBOT_DASH_MAX_VALUE <= 16384,
               "[PB-E108] PROBOT_DASH_MAX_VALUE must be 16-16384 bytes. Docs: probotstudio.com/docs/hatalar/#pb-e108");
 
+// Robot console ring (probot/telemetry/console.hpp), taken from the heap.
+#ifndef PROBOT_CONSOLE_BYTES
+#define PROBOT_CONSOLE_BYTES 4096
+#endif
+static_assert(PROBOT_CONSOLE_BYTES >= 2048 && PROBOT_CONSOLE_BYTES <= 65536,
+              "[PB-E110] PROBOT_CONSOLE_BYTES must be 2048-65536 bytes. Docs: probotstudio.com/docs/hatalar/#pb-e110");
+
 // PROBOT_LOOP_DEADLINE_MS / PROBOT_HOOK_DEADLINE_MS: see lifecycle.hpp.
 
 // Hardware task watchdog timeout (seconds). Only the sysloop supervisor is
@@ -384,6 +391,15 @@ namespace probot {
     probot::dashboard::detail::configure({ PROBOT_DASH_MAX_TOPICS, PROBOT_DASH_MAX_SCHEMAS,
                                            PROBOT_DASH_MAX_VALUE, PROBOT_DASH_POOL_BYTES,
                                            PROBOT_DASH_WRITE_QUEUE });
+    // Before the Driver Station starts: reserve() moves the records, which
+    // restarts any reader from the oldest line.
+    if (!probot::console::detail::reserve(PROBOT_CONSOLE_BYTES)) {
+      if (!probot::console::detail::g_ring.data && !probot::console::detail::reserve(probot::console::detail::kMinBytes))
+        probot::console::detail::g_noMemory = true;   // no allocation attempts per line later
+      Serial.printf("[SYS  ] [PB-E307] console: no memory for PROBOT_CONSOLE_BYTES=%u, using %u bytes"
+                    " - docs: probotstudio.com/docs/hatalar/#pb-e307\n",
+                    (unsigned)PROBOT_CONSOLE_BYTES, (unsigned)probot::console::detail::g_ring.cap);
+    }
 
 #ifdef ESP32
     probot::driverstation::start_driver_station();

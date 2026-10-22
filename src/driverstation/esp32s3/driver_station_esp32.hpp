@@ -13,6 +13,7 @@
 #include <probot/io/battery.hpp>
 #include <probot/io/gamepad.hpp>
 #include <probot/telemetry/telemetry.hpp>
+#include <probot/telemetry/console.hpp>
 #include <probot/dashboard/dashboard.hpp>
 #include "index_html.h"
 
@@ -495,6 +496,7 @@ namespace probot::driverstation::esp32 {
         }
         // After 'S'/'T', so dashboard traffic never delays the heartbeat.
         pushDashboard(now);
+        pushConsole();
       }
     }
 
@@ -544,6 +546,22 @@ namespace probot::driverstation::esp32 {
         if (reached < targets && _dashBuf[0] != probot::dashboard::detail::FRAME_VALUES)
           probot::dashboard::detail::requestResync();
         sent += n;
+      }
+    }
+
+    // Console lines, up to kConsoleFramesPerTick frames per tick so a
+    // replay after 'Q' catches up fast. Clients drop lines they already have
+    // (by sequence), so a frame some client missed is simply sent again on
+    // the next tick.
+    static constexpr int kConsoleFramesPerTick = 4;
+    void pushConsole() {
+      if (probot::console::detail::takeResend()) _conCursor = {};
+      for (int i = 0; i < kConsoleFramesPerTick; ++i) {
+        const probot::console::detail::Cursor at = _conCursor;
+        size_t n = probot::console::detail::buildFrame(_conCursor, _conBuf, sizeof _conBuf);
+        if (n == 0) break;
+        int targets = 0;
+        if (_ws.sendToAll(_conBuf, n, &targets) < targets) { _conCursor = at; break; }
       }
     }
 
@@ -1152,6 +1170,9 @@ namespace probot::driverstation::esp32 {
     TaskHandle_t         _push_task = nullptr;
     uint8_t*             _dashBuf = nullptr;
     size_t               _dashCap = 0;
+    probot::console::detail::Cursor _conCursor;
+    uint8_t              _conBuf[1400];   // one 'L' frame; >= console kMinFrame
+    static_assert(sizeof(_conBuf) >= probot::console::detail::kMinFrame, "one console line must fit a frame");
     portMUX_TYPE         _owner_mux = portMUX_INITIALIZER_UNLOCKED;
     bool                 _owner_set = false;
     char                 _owner_str[48] = {0};

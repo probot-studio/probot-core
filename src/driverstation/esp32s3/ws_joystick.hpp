@@ -8,6 +8,7 @@
 #include <probot/core/lifecycle.hpp>
 #include <probot/robot/state.hpp>
 #include <probot/dashboard/dashboard.hpp>
+#include <probot/telemetry/console.hpp>
 
 namespace probot::driverstation::esp32 {
 
@@ -31,12 +32,14 @@ namespace probot::driverstation::esp32 {
    *             [4..] value bytes
    *             (up to PROBOT_DASH_MAX_VALUE). Only queued here; robot
    *             code applies it with dashboard::drainWrites().
-   *   'Q' 0x51  dashboard resync: re-send every schema, announce and value.
+   *   'Q' 0x51  resync: re-send every dashboard schema, announce and value,
+   *             and every console line still held.
    *
    * Robot -> client binary frames (sent by the DS push task via
    * sendToAll; first byte = type):
    *   'S' 0x53  state+health JSON (also serves as the heartbeat)
    *   'T' 0x54  telemetry buffer text
+   *   'L' 0x4C  console lines (see probot/telemetry/console.hpp)
    *   'C' 'A' 'V' 'R' 'K'  dashboard schema, announce, values, remove,
    *             write refusal (see probot/dashboard/dashboard.hpp)
    */
@@ -270,6 +273,7 @@ namespace probot::driverstation::esp32 {
           break;
         case probot::dashboard::detail::FRAME_RESYNC:
           probot::dashboard::detail::requestResync();
+          probot::console::detail::requestResend();
           break;
         default:
           break;

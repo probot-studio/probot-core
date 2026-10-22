@@ -96,6 +96,7 @@ Hepsi `#include <probot.h>` satırından **önce** tanımlanır:
 | `USER_LOOP_PERIOD_MS` | `20` | InitLoop/loop sabit hızlı çağrı periyodu (~50 Hz), 1-1000; çalışırken `probot::setLoopPeriodMs()` |
 | `PROBOT_USER_STACK` | `8192` | User task stack'i, bayt (en az 4096) [PB-E107] |
 | `PROBOT_DASH_MAX_TOPICS` / `_MAX_VALUE` / `_POOL_BYTES` | `128` / `1024` / `32768` | Dashboard topic deposu sınırları (ileri seviye, bkz. API.md) [PB-E108] |
+| `PROBOT_CONSOLE_BYTES` | `4096` | Robot konsolu tamponu, bayt (2048-65536); dolunca en eski satırlar düşer [PB-E110] |
 | `NEOPIXEL_BRIGHTNESS` | `32` | Durum LED'i parlaklığı (0-255) |
 
 ## Yarışma günü: kanal planı
@@ -305,6 +306,8 @@ Kurallar:
 - Servo için ham LEDC kullan: ilgili init'te ledcAttachChannel(pin,50,14,7)
   (yüksek kanal → motor analogWrite'ıyla çakışmaz), teleopLoop'ta ledcWrite.
 - teleopLoop ~50 Hz çağrılır; içinde sonsuz döngü/uzun blocking/delay() yapma.
+- Kalıcı uyarı/hata: probot::console::warning(...) / error(...) (DS Logs
+  sayfası); probot::printf her turdaki panel içindir.
 ```
 
 Makine-okur özet: [`llms.txt`](llms.txt) · Tam referans: [`API.md`](API.md)
