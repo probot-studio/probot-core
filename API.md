@@ -266,8 +266,20 @@ static const bool kInstalled = probot::framework::install({
 
 Telemetri ve ayarlanabilir değerler (tunable) için adlı, tipli değerler.
 `#include <probot/api.hpp>` (ya da `<probot/dashboard/dashboard.hpp>`).
-DS sayfasındaki ağaç ve editörler ayrı bir sürümde gelecek; protokol
-aşağıda ("WS çerçeveleri").
+DS sayfasının **Veri** sekmesi topic'leri `/` ile ayrılmış bir ağaçta
+canlı gösterir. `TUNABLE | MUTABLE` topic'ler oradan değiştirilir (Enter
+ya da odaktan çıkınca gönderilir; robot değeri geri yollayana dek
+"bekliyor", reddedilirse sebebi görünür). Özellik JSON'undaki `min`,
+`max`, `step`, `unit` editöre uygulanır. `struct:X` değerleri `structschema`
+şemasıyla alanlarına ayrılır. Kardeş `.type` topic'i `Selectable` ise
+`options` listesinden `selected` yazan bir seçim kutusu, `Command` ise
+`running` değerini çeviren bir düğme gösterilir. `Alerts` klasöründeki
+`errors`, `warnings`, `infos` (string[]) etkin uyarıları seviyesiyle
+listeler; `PIDController` klasöründe kazançlar (`p`, `i`, `d`, `izone`,
+`setpoint`) önce gelir ve `/Tunables/<ad>` altında, aynı adlı
+`/Telemetry/<ad>` tablosundaki `measurement` ile `error` de canlı görünür. Metin kutularına boşluk
+yalnız robot STOPPED iken yazılır; diğer fazlarda Space yine acil
+durdurmadır. Protokol aşağıda ("WS çerçeveleri").
 
 ```cpp
 using namespace probot::dashboard;

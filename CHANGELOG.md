@@ -29,8 +29,15 @@ Biçim [Keep a Changelog](https://keepachangelog.com/), sürümler
   Driver Station over the existing WebSocket with new frames `'C'`, `'A'`,
   `'V'`, `'R'`, `'K'` and accepting `'W'` writes and `'Q'` resync. Limits
   via `PROBOT_DASH_*` (PB-E108); `/health` reports `dashTopics`,
-  `dashBytes`, `dashDropped`. The Driver Station page does not show the
-  topics yet.
+  `dashBytes`, `dashDropped`.
+- Driver Station "Veri" page: the dashboard topic tree with live values,
+  editors for `TUNABLE | MUTABLE` topics (pending until the robot echoes
+  the value, refusals shown), a generic `struct:X` / `struct:X[]` decoder
+  driven by `structschema` schemas, and `Selectable` (dropdown) and
+  `Command` (run/cancel button) widgets chosen by a sibling `.type` topic,
+  an `Alerts` list (`errors` / `warnings` / `infos`) and WPILib field order
+  for `PIDController` folders; a tunable PID also shows `measurement` and
+  `error` from its `/Telemetry` twin.
 
 ### Changed
 - `probot::emergencyStop()` moved to `robot/state.hpp` and
