@@ -262,6 +262,45 @@ static const bool kInstalled = probot::framework::install({
   Tanımlanan hook'lar framework turunun içinde çalışmaya devam eder. Bu
   modda yanlış yazılmış bir hook adı hata vermez, sadece çalışmaz.
 
+## Dashboard topic deposu (ileri seviye)
+
+Telemetri ve ayarlanabilir değerler (tunable) için adlı, tipli değerler.
+`#include <probot/api.hpp>` (ya da `<probot/dashboard/dashboard.hpp>`).
+DS sayfasındaki ağaç ve editörler ayrı bir sürümde gelecek; protokol
+aşağıda ("WS çerçeveleri").
+
+```cpp
+using namespace probot::dashboard;
+TopicId kp = publish("/Tunables/kP", ValueType::Double, "double",
+                     "{\"min\":0}", TUNABLE | MUTABLE);
+double v = 0.5;
+set(kp, &v, sizeof(v));               // aynı değer tekrar gönderilmez
+drainWrites([](const Write& w, void*) {
+  // DS'ten gelen değer: w.id, w.vt, w.data[0..w.len)
+}, nullptr);
+```
+
+| Fonksiyon | Anlamı |
+|---|---|
+| `publish(path, vt, typeString, propsJson, flags)` | Topic açar; aynı yol + tip için aynı id. Tip çakışması, dolu tablo ya da havuz aşımında `kInvalid`. Runtime başlamadan önce de `kInvalid` |
+| `unpublish(id)` | Topic'i kaldırır (DS'e `'R'`) |
+| `set(id, data, len)` | Değeri kopyalar; aynıysa düşer (`KEEP_DUPLICATES` hariç) |
+| `setProperties(id, json)` / `setFlags(id, flags)` | Yeniden duyurur |
+| `addSchema(name, type, data, len)` / `hasSchema(name)` | `struct:X` şemaları |
+| `drainWrites(fn, ctx)` | DS yazmalarını sırayla `fn`'e verir; `data` yalnız `fn` içinde geçerli. Tek bir task'tan çağırın |
+| `rejectWrite(id, reason)` | DS'e `'K'` reddi gönderir |
+| `stats()` | topic sayısı, bayt kullanımı, düşürülenler |
+
+Değer tipleri (`ValueType`, little-endian): 1 boolean (u8), 2 int (i64),
+3 float (f32), 4 double (f64), 5 string (UTF-8), 6 raw / `struct:X`,
+7-10 boolean/int/float/double dizisi, 11 string dizisi (her eleman
+u16 uzunluk + baytlar). Bayraklar: `TELEMETRY` 1, `TUNABLE` 2,
+`MUTABLE` 4, `ROBUST` 8, `KEEP_DUPLICATES` 16, `PERSISTENT` 32. DS yalnız
+`TUNABLE | MUTABLE` topic'lere yazabilir; uzunluğu tipine uymayan yazma
+(ör. 8 bayt olmayan double) `'K'` 4 ile reddedilir. Yazma kuyruğunda topic başına
+en son değer kalır; uygulanan her yazmadan sonra robotun değeri DS'e
+yeniden gönderilir.
+
 ### Config-free başlık ve sürüm makroları
 
 `<probot/api.hpp>` WiFi/batarya makrosu istemez; sketch dışındaki `.cpp`
@@ -299,6 +338,13 @@ Yaşam döngüsü / güvenlik makroları:
 | `USER_LOOP_PERIOD_MS` | 20 | Loop çağrı periyodu (~50 Hz) |
 | `PROBOT_USER_STACK` | 8192 | User task stack'i, bayt (en az 4096, PB-E107) |
 | `PROBOT_FRAMEWORK` | tanımsız | Tanımlıysa OpMode hook'larının hepsi isteğe bağlı (framework katmanı için) |
+| `PROBOT_DASH_MAX_TOPICS` | 128 | Dashboard topic sayısı (1-255, PB-E108) |
+| `PROBOT_DASH_MAX_SCHEMAS` | 32 | Şema sayısı (0-255) |
+| `PROBOT_DASH_MAX_VALUE` | 1024 | Değer / özellik / şema başına bayt (16-16384, PB-E108) |
+| `PROBOT_DASH_POOL_BYTES` | 32768 | Ad, tip, özellik, değer ve şemalar için toplam bayt |
+| `PROBOT_DASH_WRITE_QUEUE` | 2048 | Bekleyen DS yazmaları için bayt |
+| `PROBOT_DASH_PERIOD_MS` | 50 | Dashboard gönderim periyodu (10-250) |
+| `PROBOT_DASH_MAX_BYTES_PER_TICK` | 8192 | Periyot başına en çok dashboard baytı |
 
 ## Hata kodları (PB-Exx)
 
@@ -316,6 +362,7 @@ zamanı · **E4xx** protokol/HTTP (E409, HTTP 409'un karşılığıdır).
 | PB-E105 | Derleme | Batarya kaynak çakışması/geçersiz seçim — hem `PROBOT_BATTERY_ADC_PIN` hem `PROBOT_BATTERY_INA` tanımlı; ya da `_INA` 219/226 değil; ya da `_TRIM` 0.5-2.0 dışında |
 | PB-E106 | Derleme | `redefinition of void robotInit()` / `robotEnd()`: 0.3.x hook'ları 0.4.0'da kaldırıldı; kurulum kodunu `teleopInit()`/`autonomousInit()`'e, güvenli durdurmayı `teleopStop()`/`autonomousStop()`'a taşıyın |
 | PB-E107 | Derleme | `PROBOT_USER_STACK` 4096 bayttan küçük |
+| PB-E108 | Derleme | Dashboard sınırı geçersiz: `PROBOT_DASH_MAX_TOPICS` 1-255, `PROBOT_DASH_MAX_SCHEMAS` 0-255, `PROBOT_DASH_MAX_VALUE` 16-16384, `PROBOT_DASH_PERIOD_MS` 10-250 dışında |
 | PB-E201 | Bağlama | Zorunlu hook tanımsız — `undefined reference to teleopLoop()` vb. Dördü de (boş olsa bile) tanımlanmalı |
 | PB-E202 | Bağlama | `setup()`/`loop()` sketch'te tanımlanmış — kütüphaneye aittir, hook'ları kullanın |
 | PB-E301 | Çalışma | Deadline miss / stall: bir `initLoop`/`loop` turu `PROBOT_LOOP_DEADLINE_MS`'i (ya da tek seferlik `init`/`start`/`stop` hook'u `PROBOT_HOOK_DEADLINE_MS`'i) aştı; girişler sıfır, halt-safe |
@@ -370,7 +417,7 @@ yazacaksanız:
 | `/getState` | GET | gerekli | `{"status":N,"phase":N,"selectedMode":"auto|teleop","autoPeriodSeconds":N,"autoRemainingMs":N,"batt":V.V,"estop":b}` (WS yokken fallback). `batt`: pil gerilimi (bölücü/INA otomatik ya da `setBatteryVoltage()` elle), `0.0` = veri yok |
 | `/telemetry` | GET | gerekli | Telemetri tamponunun içeriği (text) (WS yokken fallback) |
 | `/getBattery` | GET | serbest | Pil gerilimi (kaynak: `PROBOT_BATTERY_ADC_PIN` bölücü, `PROBOT_BATTERY_INA` sensörü ya da elle `probot::setBatteryVoltage()`) |
-| `/health` | GET | serbest | `{"rssi":N,"up":ms,"heap":N,"dm":b,"joyAgeMs":N,"sta":N,"disc":N}` — izleme/hakem için. `joyAgeMs`: son joystick paketinin yaşı (-1 = hiç gelmedi), `sta`: bağlı istemci sayısı, `disc`: son kopuşun IEEE reason kodu |
+| `/health` | GET | serbest | `{"rssi":N,"up":ms,"heap":N,"dm":b,"joyAgeMs":N,"sta":N,"disc":N,"dashTopics":N,"dashBytes":N,"dashDropped":N}`: izleme/hakem için. `joyAgeMs`: son joystick paketinin yaşı (-1 = hiç gelmedi), `sta`: bağlı istemci sayısı, `disc`: son kopuşun IEEE reason kodu, `dash*`: dashboard topic sayısı, kullanılan bayt, düşürülen yazma/değer |
 | `/info` | GET | serbest | SSID, kanal + `chSource` (macro/nvs/auto), IP, çip/heap/flash |
 | `/portal` | GET | serbest | Captive portal karşılama sayfası (`PROBOT_CAPTIVE_PORTAL 0` ile kapatılır) |
 
@@ -397,18 +444,45 @@ Sahip düştüğünde gamepad verisi anında sıfırlanır.
   [sonra]  uint8[] butonlar, bit-paketli, LSB önce
 'P' 0x50  boşta keepalive (tek bayt) — gamepad yokken 2 sn'de bir;
           owner slotunu ve DS aktivitesini canlı tutar
+'W' 0x57  dashboard yazma: [1..2] u16 topic id (LE), [3] u8 değer tipi,
+          [4..] değer baytları (en çok PROBOT_DASH_MAX_VALUE). Yalnız
+          kuyruğa girer; robot kodu drainWrites() ile uygular
+'Q' 0x51  dashboard yeniden eşitleme (tek bayt): tüm şema, duyuru ve
+          değerler yeniden gönderilir. Sayfa her bağlantıda ve bilmediği
+          bir id gördüğünde yollar
 ```
+
+`'J'`/`'P'` en çok 47 bayttır; yalnız `'W'` bundan uzun olabilir: en çok
+47 ile 4 + `dashMax` (`'S'` çerçevesinde) arasından büyük olanı kadar. Bu
+sınırı aşan çerçeve bağlantıyı kapatır; sınır içinde kalıp değeri `dashMax`
+bayttan uzun olan `'W'` `'K'` 4 ile reddedilir. Robot açılışta büyük çerçeve
+tamponunu ayıramadıysa 47 bayttan uzun her çerçeve bağlantıyı kapatır.
 
 Robot → istemci (push):
 
 ```
 'S' 0x53  durum+sağlık JSON'u — değişiklikte bir sonraki tick'te
           (250 ms), değişiklik yoksa en geç ~1.25 sn'de bir (heartbeat
-          görevi de görür). Alanlar /getState + /health birleşimi
-          (`estop` alanı dahil: acil durdurma kilidi; `batt` alanı
-          dahil: pil gerilimi, 0.0 = veri yok).
+          görevi de görür). Alanlar: /getState'in tümü (`estop`: acil
+          durdurma kilidi; `batt`: pil gerilimi, 0.0 = veri yok), /health'in
+          `dash*` sayaçları dışındaki alanları ve `dashMax` (bir dashboard
+          değerinin en çok bayt sayısı; yalnız burada).
 'T' 0x54  telemetri tamponu (text) — içerik değiştiğinde
+'C' 0x43  şema: u8 ad uzunluğu, ad, u8 tip uzunluğu, tip, u16 uzunluk,
+          baytlar (ör. "struct:Pose2d", "structschema")
+'A' 0x41  topic duyurusu, tekrarlı: u16 id, u8 değer tipi, u8 bayraklar,
+          u8 ad uzunluğu, ad, u8 tip uzunluğu, tip, u16 özellik uzunluğu,
+          özellik JSON'u
+'V' 0x56  değerler: u32 robot ms, tekrarlı { u16 id, u16 uzunluk, baytlar }.
+          Yalnız değişenler, 50 ms'de bir (PROBOT_DASH_PERIOD_MS),
+          ~1400 baytta bölünür
+'R' 0x52  topic kaldırıldı, tekrarlı: u16 id
+'K' 0x4B  yazma reddi, tekrarlı: u16 id, u8 durum (1 bilinmeyen id,
+          2 değiştirilemez, 3 tip uyuşmazlığı, 4 çözümlenemedi,
+          5 kuyruk dolu)
 ```
+
+Dashboard çerçevelerinde tüm çok baytlı alanlar little-endian'dır.
 
 ≥5 saniye hiç çerçeve alamayan istemci bağlantıyı ölü sayıp yeniden
 bağlanmalıdır.

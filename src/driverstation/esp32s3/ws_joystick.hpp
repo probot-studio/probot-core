@@ -6,6 +6,7 @@
 #include <probot/io/gamepad.hpp>
 #include <probot/core/lifecycle.hpp>
 #include <probot/robot/state.hpp>
+#include <probot/dashboard/dashboard.hpp>
 
 namespace probot::driverstation::esp32 {
 
@@ -21,11 +22,18 @@ namespace probot::driverstation::esp32 {
    *     [4+nA*2]  uint8[] buttons (packed bits, LSB first)
    *   'P' 0x50  idle keepalive (no payload) — sent when no gamepad is
    *             active so the owner slot / DS activity stay alive.
+   *   'W' 0x57  dashboard write: [1..2] u16 id (LE), [3] u8 value type,
+   *             [4..] value bytes
+   *             (up to PROBOT_DASH_MAX_VALUE). Only queued here; robot
+   *             code applies it with dashboard::drainWrites().
+   *   'Q' 0x51  dashboard resync: re-send every schema, announce and value.
    *
    * Robot -> client binary frames (sent by the DS push task via
    * sendToAll; first byte = type):
    *   'S' 0x53  state+health JSON (also serves as the heartbeat)
    *   'T' 0x54  telemetry buffer text
+   *   'C' 'A' 'V' 'R' 'K'  dashboard schema, announce, values, remove,
+   *             write refusal (see probot/dashboard/dashboard.hpp)
    */
   class WsJoystick {
   public:
@@ -53,6 +61,11 @@ namespace probot::driverstation::esp32 {
     void attach(httpd_handle_t server) {
       _server = server;
       _sendMutex = xSemaphoreCreateMutex();
+      // Dashboard writes exceed MAX_FRAME. httpd runs every handler on one
+      // task, so a single receive buffer serves all sessions.
+      _bigCap = 4 + probot::dashboard::detail::maxValue();
+      _big = (uint8_t*)malloc(_bigCap);
+      if (!_big) _bigCap = 0;
 
       httpd_uri_t ws_uri = {
         .uri      = "/joystick",
@@ -71,8 +84,10 @@ namespace probot::driverstation::esp32 {
     // serialized behind _sendMutex (concurrent sends to one fd corrupt
     // frames — esp-idf #14495); per-fd consecutive failures close the
     // session after SEND_MAX_FAILS. Returns the number of clients that
-    // received the frame.
-    int sendToAll(const uint8_t* data, size_t len) {
+    // received the frame; *targets (optional) gets how many it tried to
+    // reach.
+    int sendToAll(const uint8_t* data, size_t len, int* targets = nullptr) {
+      if (targets) *targets = 0;
       if (!_server || len == 0) return 0;
       httpd_ws_frame_t frame = {};
       frame.type    = HTTPD_WS_TYPE_BINARY;
@@ -82,6 +97,10 @@ namespace probot::driverstation::esp32 {
       size_t fds = MAX_CLIENTS;
       int clients[MAX_CLIENTS];
       if (httpd_get_client_list(_server, &fds, clients) != ESP_OK) return 0;
+      if (targets) {
+        for (size_t i = 0; i < fds; i++)
+          if (httpd_ws_get_fd_info(_server, clients[i]) == HTTPD_WS_CLIENT_WEBSOCKET) ++*targets;
+      }
 
       if (_sendMutex && xSemaphoreTake(_sendMutex, pdMS_TO_TICKS(500)) != pdTRUE) return 0;
 
@@ -99,6 +118,7 @@ namespace probot::driverstation::esp32 {
         if (_peerFilter && !_peerFilter(_peerCtx, clients[i])) {
           httpd_sess_trigger_close(_server, clients[i]);
           clearFd(clients[i]);
+          if (targets) --*targets;
           continue;
         }
         uint8_t* fails = trackFd(clients[i]);
@@ -218,16 +238,35 @@ namespace probot::driverstation::esp32 {
 
       // Step 2: bounds check, then receive payload. An oversize frame
       // cannot be skipped without draining it — close the session
-      // cleanly instead of silently desyncing.
+      // cleanly instead of silently desyncing. Only a dashboard write may
+      // exceed MAX_FRAME; the type byte is checked once it is read.
       if (frame.len == 0) return ESP_OK;
-      if (frame.len > MAX_FRAME) return ESP_FAIL;
-
-      uint8_t buf[MAX_FRAME];
+      uint8_t small[MAX_FRAME];
+      uint8_t* buf = small;
+      if (frame.len > MAX_FRAME) {
+        if (frame.len > self->_bigCap) return ESP_FAIL;
+        buf = self->_big;
+      }
       frame.payload = buf;
       ret = httpd_ws_recv_frame(req, &frame, frame.len);
       if (ret != ESP_OK) return ret;
 
-      self->parseFrame(buf, frame.len);
+      switch (buf[0]) {
+        case MAGIC:
+          if (frame.len <= MAX_FRAME) self->parseFrame(buf, frame.len);
+          break;
+        case probot::dashboard::detail::FRAME_WRITE:
+          if (frame.len >= 4) {
+            probot::dashboard::detail::pushWrite((uint16_t)(buf[1] | (buf[2] << 8)), buf[3],
+                                                 buf + 4, frame.len - 4);
+          }
+          break;
+        case probot::dashboard::detail::FRAME_RESYNC:
+          probot::dashboard::detail::requestResync();
+          break;
+        default:
+          break;
+      }
       return ESP_OK;
     }
 
@@ -283,6 +322,8 @@ namespace probot::driverstation::esp32 {
     PeerFilter          _peerFilter = nullptr;
     void*               _peerCtx = nullptr;
     SendState           _sendState[MAX_CLIENTS] = {};
+    uint8_t*            _big = nullptr;
+    size_t              _bigCap = 0;
   };
 
 }

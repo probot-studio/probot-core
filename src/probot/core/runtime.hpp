@@ -8,6 +8,7 @@
 #include <probot/core/status_led.hpp>
 #include <probot/io/battery.hpp>
 #include <probot/framework.hpp>
+#include <probot/dashboard/dashboard.hpp>
 
 // Driver-station inactivity → STOP (1, default, safe) or just disconnect (0).
 #ifndef PROBOT_DS_TIMEOUT_MS
@@ -16,6 +17,30 @@
 #ifndef PROBOT_DS_TIMEOUT_FORCE_STOP
 #define PROBOT_DS_TIMEOUT_FORCE_STOP 1
 #endif
+
+// Dashboard topic store limits (probot/dashboard/dashboard.hpp). Memory is
+// taken from the heap only once something is published.
+#ifndef PROBOT_DASH_MAX_TOPICS
+#define PROBOT_DASH_MAX_TOPICS 128
+#endif
+#ifndef PROBOT_DASH_MAX_SCHEMAS
+#define PROBOT_DASH_MAX_SCHEMAS 32
+#endif
+#ifndef PROBOT_DASH_MAX_VALUE
+#define PROBOT_DASH_MAX_VALUE 1024
+#endif
+#ifndef PROBOT_DASH_POOL_BYTES
+#define PROBOT_DASH_POOL_BYTES 32768
+#endif
+#ifndef PROBOT_DASH_WRITE_QUEUE
+#define PROBOT_DASH_WRITE_QUEUE 2048
+#endif
+static_assert(PROBOT_DASH_MAX_SCHEMAS >= 0 && PROBOT_DASH_MAX_SCHEMAS <= 255,
+              "[PB-E108] PROBOT_DASH_MAX_SCHEMAS must be 0-255. Docs: probotstudio.com/docs/hatalar/#pb-e108");
+static_assert(PROBOT_DASH_MAX_TOPICS >= 1 && PROBOT_DASH_MAX_TOPICS <= 255,
+              "[PB-E108] PROBOT_DASH_MAX_TOPICS must be 1-255. Docs: probotstudio.com/docs/hatalar/#pb-e108");
+static_assert(PROBOT_DASH_MAX_VALUE >= 16 && PROBOT_DASH_MAX_VALUE <= 16384,
+              "[PB-E108] PROBOT_DASH_MAX_VALUE must be 16-16384 bytes. Docs: probotstudio.com/docs/hatalar/#pb-e108");
 
 // PROBOT_LOOP_DEADLINE_MS / PROBOT_HOOK_DEADLINE_MS: see lifecycle.hpp.
 
@@ -335,6 +360,9 @@ namespace probot {
     // TU happens to construct the services.
     probot::io::gamepad().setTimeoutMs(PROBOT_INPUT_TIMEOUT_MS);
     probot::io::rawGamepad().setTimeoutMs(PROBOT_INPUT_TIMEOUT_MS);
+    probot::dashboard::detail::configure({ PROBOT_DASH_MAX_TOPICS, PROBOT_DASH_MAX_SCHEMAS,
+                                           PROBOT_DASH_MAX_VALUE, PROBOT_DASH_POOL_BYTES,
+                                           PROBOT_DASH_WRITE_QUEUE });
 
 #ifdef ESP32
     probot::driverstation::start_driver_station();

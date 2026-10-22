@@ -15,3 +15,4 @@
 #include <probot/telemetry/telemetry.hpp>
 #include <probot/ds.hpp>
 #include <probot/framework.hpp>
+#include <probot/dashboard/dashboard.hpp>

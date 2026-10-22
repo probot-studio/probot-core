@@ -12,7 +12,18 @@
 #include <probot/io/battery.hpp>
 #include <probot/io/gamepad.hpp>
 #include <probot/telemetry/telemetry.hpp>
+#include <probot/dashboard/dashboard.hpp>
 #include "index_html.h"
+
+// Dashboard push cadence and per-tick byte budget (see pushDashboard()).
+#ifndef PROBOT_DASH_PERIOD_MS
+#define PROBOT_DASH_PERIOD_MS 50
+#endif
+#ifndef PROBOT_DASH_MAX_BYTES_PER_TICK
+#define PROBOT_DASH_MAX_BYTES_PER_TICK 8192
+#endif
+static_assert(PROBOT_DASH_PERIOD_MS >= 10 && PROBOT_DASH_PERIOD_MS <= 250,
+              "[PB-E108] PROBOT_DASH_PERIOD_MS must be 10-250. Docs: probotstudio.com/docs/hatalar/#pb-e108");
 #include "ws_joystick.hpp"
 
 #ifndef PROBOT_WIFI_AP_PASSWORD
@@ -438,7 +449,7 @@ namespace probot::driverstation::esp32 {
       int n = snprintf(out, out_size,
         "{\"status\":%u,\"phase\":%u,\"selectedMode\":\"%s\",\"autoPeriodSeconds\":%d,"
         "\"autoRemainingMs\":%u,\"batt\":%u.%u,\"rssi\":%d,\"up\":%lu,\"heap\":%lu,\"dm\":%s,"
-        "\"estop\":%s,\"joyAgeMs\":%ld,\"sta\":%ld,\"disc\":%u}",
+        "\"estop\":%s,\"joyAgeMs\":%ld,\"sta\":%ld,\"disc\":%u,\"dashMax\":%lu}",
         static_cast<unsigned>(s.status),
         static_cast<unsigned>(s.phase),
         opModeName(s.selectedMode),
@@ -452,7 +463,8 @@ namespace probot::driverstation::esp32 {
         __atomic_load_n(&probot::robot::g_estop_latched, __ATOMIC_SEQ_CST) ? "true" : "false",
         joyAge,
         (long)diag::g_sta_count,
-        (unsigned)diag::g_last_disc_reason);
+        (unsigned)diag::g_last_disc_reason,
+        (unsigned long)probot::dashboard::detail::maxValue());
       if (n < 0) return 0;
       return ((size_t)n >= out_size) ? out_size - 1 : (size_t)n;
     }
@@ -465,31 +477,66 @@ namespace probot::driverstation::esp32 {
       uint32_t lastStateSent = 0;
       uint32_t lastStateSeq = ~0u;
       uint32_t lastTelemSeq = ~0u;
+      uint32_t lastSlowTick = 0;
       for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(250));
+        vTaskDelay(pdMS_TO_TICKS(PROBOT_DASH_PERIOD_MS));
         if (!_server) continue;
         uint32_t now = millis();
-
-        // State changes go out on the next tick; otherwise re-sent every
-        // second so the frame doubles as the link heartbeat.
-        auto s = _rs.read();
-        if (s.seq != lastStateSeq || (uint32_t)(now - lastStateSent) >= 1000) {
-          char buf[352];
-          buf[0] = 'S';
-          size_t n = 1 + buildStateHealthJson(buf + 1, sizeof(buf) - 1, s, now);
-          _ws.sendToAll(reinterpret_cast<const uint8_t*>(buf), n);
-          lastStateSent = now;
-          lastStateSeq = s.seq;
+        if ((uint32_t)(now - lastSlowTick) >= 250) {
+          lastSlowTick = now;
+          pushStateAndTelemetry(now, lastStateSent, lastStateSeq, lastTelemSeq);
         }
+        // After 'S'/'T', so dashboard traffic never delays the heartbeat.
+        pushDashboard(now);
+      }
+    }
 
-        uint32_t tseq = probot::telemetry::getSeq();
-        if (tseq != lastTelemSeq) {
-          char tbuf[1 + probot::telemetry::detail::BUFFER_SIZE + 1];
-          tbuf[0] = 'T';
-          size_t n = probot::telemetry::copyBuffer(tbuf + 1, sizeof(tbuf) - 1);
-          _ws.sendToAll(reinterpret_cast<const uint8_t*>(tbuf), 1 + n);
-          lastTelemSeq = tseq;
-        }
+    void pushStateAndTelemetry(uint32_t now, uint32_t& lastStateSent,
+                               uint32_t& lastStateSeq, uint32_t& lastTelemSeq) {
+      // State changes go out on the next tick; otherwise re-sent every
+      // second so the frame doubles as the link heartbeat.
+      auto s = _rs.read();
+      if (s.seq != lastStateSeq || (uint32_t)(now - lastStateSent) >= 1000) {
+        char buf[384];
+        buf[0] = 'S';
+        size_t n = 1 + buildStateHealthJson(buf + 1, sizeof(buf) - 1, s, now);
+        _ws.sendToAll(reinterpret_cast<const uint8_t*>(buf), n);
+        lastStateSent = now;
+        lastStateSeq = s.seq;
+      }
+
+      uint32_t tseq = probot::telemetry::getSeq();
+      if (tseq != lastTelemSeq) {
+        char tbuf[1 + probot::telemetry::detail::BUFFER_SIZE + 1];
+        tbuf[0] = 'T';
+        size_t n = probot::telemetry::copyBuffer(tbuf + 1, sizeof(tbuf) - 1);
+        _ws.sendToAll(reinterpret_cast<const uint8_t*>(tbuf), 1 + n);
+        lastTelemSeq = tseq;
+      }
+    }
+
+    // Dashboard frames, at most PROBOT_DASH_MAX_BYTES_PER_TICK per tick so
+    // a burst of values cannot delay the 'S' heartbeat. The frame buffer is
+    // allocated the first time anything is published.
+    void pushDashboard(uint32_t now) {
+      if (!_dashBuf) {
+        if (!probot::dashboard::detail::active()) return;
+        _dashCap = probot::dashboard::detail::frameCapacity();
+        _dashBuf = (uint8_t*)malloc(_dashCap);
+        if (!_dashBuf) return;
+      }
+      size_t sent = 0;
+      while (sent < PROBOT_DASH_MAX_BYTES_PER_TICK) {
+        size_t n = probot::dashboard::detail::buildFrame(_dashBuf, _dashCap, now);
+        if (n == 0) break;
+        int targets = 0;
+        int reached = _ws.sendToAll(_dashBuf, n, &targets);
+        // Announces, removes, schemas and refusals are sent once. If a
+        // client missed one, start over rather than leave it with ids it
+        // does not know (a missed 'V' only delays that value).
+        if (reached < targets && _dashBuf[0] != probot::dashboard::detail::FRAME_VALUES)
+          probot::dashboard::detail::requestResync();
+        sent += n;
       }
     }
 
@@ -928,17 +975,22 @@ namespace probot::driverstation::esp32 {
         int32_t d = (int32_t)(now - joyLast);
         joyAge = d < 0 ? 0 : d;
       }
-      char buf[192];
+      auto dash = probot::dashboard::stats();
+      char buf[256];
       snprintf(buf, sizeof(buf),
         "{\"rssi\":%d,\"up\":%lu,\"heap\":%lu,\"dm\":%s,"
-        "\"joyAgeMs\":%ld,\"sta\":%ld,\"disc\":%u}",
+        "\"joyAgeMs\":%ld,\"sta\":%ld,\"disc\":%u,"
+        "\"dashTopics\":%u,\"dashBytes\":%lu,\"dashDropped\":%lu}",
         (int)readApRssi(),
         (unsigned long)now,
         (unsigned long)ESP.getFreeHeap(),
         s.deadlineMiss ? "true" : "false",
         joyAge,
         (long)diag::g_sta_count,
-        (unsigned)diag::g_last_disc_reason);
+        (unsigned)diag::g_last_disc_reason,
+        (unsigned)dash.topics,
+        (unsigned long)dash.bytesUsed,
+        (unsigned long)dash.dropped);
 
       httpd_resp_set_type(req, "application/json");
       httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
@@ -1038,6 +1090,8 @@ namespace probot::driverstation::esp32 {
     WsJoystick           _ws;
     httpd_handle_t       _server = nullptr;
     TaskHandle_t         _push_task = nullptr;
+    uint8_t*             _dashBuf = nullptr;
+    size_t               _dashCap = 0;
     portMUX_TYPE         _owner_mux = portMUX_INITIALIZER_UNLOCKED;
     bool                 _owner_set = false;
     char                 _owner_str[48] = {0};
