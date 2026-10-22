@@ -95,7 +95,7 @@ Hepsi `#include <probot.h>` satırından **önce** tanımlanır:
 | `PROBOT_BATTERY_TRIM` | `1.0f` | Multimetreyle ince ayar çarpanı (0.5-2.0) |
 | `USER_LOOP_PERIOD_MS` | `20` | InitLoop/loop sabit hızlı çağrı periyodu (~50 Hz), 1-1000; çalışırken `probot::setLoopPeriodMs()` |
 | `PROBOT_USER_STACK` | `8192` | User task stack'i, bayt (en az 4096) [PB-E107] |
-| `PROBOT_DASH_MAX_TOPICS` / `_MAX_VALUE` / `_POOL_BYTES` | `128` / `1024` / `32768` | Dashboard topic deposu sınırları (ileri seviye, bkz. API.md) [PB-E108] |
+| `PROBOT_DASH_MAX_TOPICS` / `_MAX_VALUE` / `_MAX_SCHEMA_BYTES` / `_POOL_BYTES` | `128` / `1024` / `4096` / `32768` | Dashboard topic deposu sınırları (ileri seviye, bkz. API.md) [PB-E108] |
 | `PROBOT_CONSOLE_BYTES` | `4096` | Robot konsolu tamponu, bayt (2048-65536); dolunca en eski satırlar düşer [PB-E110] |
 | `NEOPIXEL_BRIGHTNESS` | `32` | Durum LED'i parlaklığı (0-255) |
 

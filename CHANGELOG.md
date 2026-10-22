@@ -107,6 +107,11 @@ Biçim [Keep a Changelog](https://keepachangelog.com/), sürümler
   whether it has been set since boot.
 
 ### Changed
+- Dashboard schemas have their own size limit, `PROBOT_DASH_MAX_SCHEMA_BYTES`
+  (default 4096, 16-32768, PB-E108), still counted in
+  `PROBOT_DASH_POOL_BYTES`. They used to be limited by
+  `PROBOT_DASH_MAX_VALUE` (1024), which refused protobuf descriptors such as
+  `geometry2d.proto` (about 1.3 KB).
 - The Driver Station page is stored gzip-compressed and served with
   `Content-Encoding: gzip`: about 102 KB less flash in every sketch (the
   examples drop from about 1.11 MB to 1.01 MB). Its source is now

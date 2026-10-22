@@ -133,7 +133,7 @@ All of them are defined **before** the `#include <probot.h>` line.
 | `PROBOT_BATTERY_TRIM` | `1.0f` | Fine-tuning multiplier against a multimeter (0.5-2.0) |
 | `USER_LOOP_PERIOD_MS` | `20` | Fixed-rate call period of InitLoop/loop (~50 Hz), 1-1000; change at runtime with `probot::setLoopPeriodMs()` |
 | `PROBOT_USER_STACK` | `8192` | User task stack in bytes (at least 4096) [PB-E107] |
-| `PROBOT_DASH_MAX_TOPICS` / `_MAX_VALUE` / `_POOL_BYTES` | `128` / `1024` / `32768` | Dashboard topic store limits (advanced, see API.md) [PB-E108] |
+| `PROBOT_DASH_MAX_TOPICS` / `_MAX_VALUE` / `_MAX_SCHEMA_BYTES` / `_POOL_BYTES` | `128` / `1024` / `4096` / `32768` | Dashboard topic store limits (advanced, see API.md) [PB-E108] |
 | `PROBOT_CONSOLE_BYTES` | `4096` | Robot console buffer in bytes (2048-65536); the oldest lines drop when it is full [PB-E110] |
 | `NEOPIXEL_BRIGHTNESS` | `32` | Status LED brightness (0-255) |
 

@@ -47,9 +47,10 @@ namespace probot::dashboard {
   struct Limits {
     uint16_t maxTopics;        // at most 255
     uint16_t maxSchemas;
-    uint32_t maxValue;         // bytes per value, property string or schema
+    uint32_t maxValue;         // bytes per value or property string
     uint32_t poolBytes;        // names, types, properties, values, schemas
     uint32_t writeQueueBytes;  // pending Driver Station writes
+    uint32_t maxSchemaBytes;   // bytes per schema (protobuf descriptors exceed a value)
   };
 
   namespace detail {
@@ -217,6 +218,7 @@ namespace probot::dashboard {
       st.lim = lim;
       if (st.lim.maxTopics > 255) st.lim.maxTopics = 255;
       if (st.lim.maxValue > 16384) st.lim.maxValue = 16384;
+      if (st.lim.maxSchemaBytes > 32768) st.lim.maxSchemaBytes = 32768;
       st.configured = true;
       return true;
     }
@@ -240,7 +242,9 @@ namespace probot::dashboard {
       size_t named = 1 + 255 + 1 + 255;           // name and type with lengths
       size_t announce = 1 + 2 + 2 + named + 2 + st.lim.maxValue;
       size_t values = 1 + 4 + 4 + st.lim.maxValue;
+      size_t schema = 1 + named + 2 + st.lim.maxSchemaBytes;
       size_t m = announce > values ? announce : values;
+      if (schema > m) m = schema;
       return m > kFrameTarget ? m : kFrameTarget;
     }
 
@@ -601,7 +605,8 @@ namespace probot::dashboard {
 
   // Registers a struct/proto schema (e.g. name "struct:Pose2d", type
   // "structschema"). Idempotent per name. Returns false when it cannot be
-  // stored.
+  // stored: longer than Limits::maxSchemaBytes, no free schema slot, or the
+  // pool is full.
   inline bool addSchema(const char* name, const char* type, const void* data, size_t len) {
     using namespace detail;
     Store& st = g_store;
@@ -611,7 +616,7 @@ namespace probot::dashboard {
     const uint32_t bytes = (uint32_t)(nl + tl + 2 + len);
     {
       core::MuxGuard g(st.mux);
-      if (len > st.lim.maxValue) return false;
+      if (len > st.lim.maxSchemaBytes) return false;
       for (uint16_t i = 0; i < st.lim.maxSchemas; ++i)
         if (st.schemas[i].name && strcmp(st.schemas[i].name, name) == 0) return true;
       if (!reserve(st, bytes)) return false;
