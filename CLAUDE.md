@@ -35,8 +35,9 @@ follow from that:
   (`library.json`, `platforms: espressif32`, framework `arduino`), and ESP-IDF with the Arduino
   component (`CMakeLists.txt` + `idf_component.yml`; call `probot::runtime_setup()`).
 - Dependency: Adafruit NeoPixel `>= 1.12.0` (status LED).
-- Sketches need the **Huge APP (3MB No OTA)** partition scheme; the embedded UI makes the
-  default partition too small.
+- Sketches use the **Huge APP (3MB No OTA)** partition scheme (the documented requirement).
+  Since the UI is stored gzip-compressed the examples fit the default 1.25 MB app partition,
+  but sketches with larger user code or libraries do not.
 - Host build: the pure-logic parts compile and run on a desktop with `g++ -std=c++17`
   (see Commands).
 
@@ -59,10 +60,12 @@ includes the modules). Namespace `probot`.
 | `src/probot/telemetry/telemetry.hpp` | Fixed-size telemetry buffer (`probot::printf` / `println`) |
 | `src/probot/devices/leds/builtin.hpp` | Status-only NeoPixel and optional RSL pin |
 | `src/driverstation/esp32s3/driver_station_esp32.hpp`, `ws_joystick.hpp` | WiFi AP, httpd, HTTP/WS protocol, captive portal, channel selection |
-| `src/driverstation/esp32s3/index_html.h` | The Driver Station web UI as one raw string in PROGMEM |
+| `ui/index.html` | The Driver Station web UI (one HTML file with inline CSS and JS); edit this |
+| `src/driverstation/esp32s3/index_html_gz.h` | Generated from `ui/index.html` by `tools/gen_ui.py`: the page gzip-compressed as a PROGMEM byte array, served with `Content-Encoding: gzip` |
 | `tests/` | Host unit tests (custom harness) with Arduino/FreeRTOS stubs in `tests/stubs/` |
 | `examples/` | `JoystickTest`, `TankDrive`, `ServoTest` sketches |
 | `tools/sync_version.py` | Propagates `VERSION` into metadata and doc headers |
+| `tools/gen_ui.py` | Generates `index_html_gz.h` from `ui/index.html`; `--check` is the CI drift check |
 
 The lifecycle is cooperative: one persistent user task observes the desired state only at
 loop boundaries, so stop and phase changes never interrupt a hook that holds a bus or
@@ -106,12 +109,14 @@ Adafruit NeoPixel; the ESP32 core must be installed).
 | `make tests/control_tests && ./tests/control_tests` | Host unit tests, no hardware (`g++ -std=c++17 -Wall -Wextra -pedantic` with the test defines and stubs) |
 | `make test` | `build` (default example) plus host tests |
 | `make version-sync` | Run `tools/sync_version.py` |
+| `make ui` | Regenerate `index_html_gz.h` from `ui/index.html` (also run by `make build`) |
 | `make clean` | Remove `.build/`, the arduino-cli cache and the test binary |
 
 CI (`.github/workflows/ci.yml`) runs on pushes to `stable`, `dev`, `dev-*` and on PRs to
 `stable` and `dev`: it installs arduino-cli 1.3.1 and the esp32 core, installs Adafruit
-NeoPixel, then runs `make build EXAMPLE=all`, `make tests/control_tests` and
-`./tests/control_tests`. Run the same three commands locally before opening a PR.
+NeoPixel, checks that `index_html_gz.h` matches `ui/index.html` (`python3 tools/gen_ui.py
+--check`), then runs `make build EXAMPLE=all`, `make tests/control_tests` and
+`./tests/control_tests`. Run the same commands locally before opening a PR.
 
 Tests use a small custom harness (`tests/test_harness.hpp`: `TEST_CASE(...)`,
 `EXPECT_TRUE`...); every `tests/*.cpp` is compiled into one binary. Add new test files under
@@ -175,8 +180,9 @@ documented in the PR.
   copy.
 - **Time and timeouts.** Use `millis()`-based deadlines (all existing timeouts are macro
   configurable in ms). Any new I2C or sensor access in library code must have a timeout.
-- **Flash budget.** The embedded UI (`index_html.h`, about 2200 lines) dominates flash use and
-  is why Huge APP is required. Check the sketch size after UI changes.
+- **Flash budget.** The embedded UI (`ui/index.html`, about 2200 lines) is the largest library
+  asset; it is stored gzip-compressed (about 41 KB instead of 144 KB). Huge APP stays the
+  documented partition. Check the sketch size after UI changes.
 - **WiFi.** 2.4 GHz channels 1-13 only; channel plan defaults are 1/6/11. Do not make
   automatic channel selection default: it stacks simultaneously booted robots on one channel.
 - **Pins.** Battery ADC pins must be ADC1 (GPIO1-10 on the S3); ADC2 does not work with WiFi.
@@ -201,16 +207,19 @@ When a public header, macro, protocol field or error code changes, update in the
 
 ## Gotchas
 
-- `make build` mutates tracked files: `sync_version.py` rewrites metadata and doc headers. Run
+- `make build` mutates tracked files: `sync_version.py` rewrites metadata and doc headers, and
+  `gen_ui.py` rewrites `index_html_gz.h` when `ui/index.html` changed. Run
   `git status` after a build and keep only intended changes.
 - The `make test` target builds the default (first) example, which requires `arduino-cli`;
   the host tests alone do not.
 - The host test build defines `PROBOT_CLM_NOLOG`, `PROBOT_SCHED_NOLOG`,
   `PROBOT_LOGGER_NO_SCHED_ATTACH` and `PROBOT_BUILTINLED_EXTERNAL`; the Makefile also passes
   the first two when building the `LoopPeriodStress` example name (not present today).
-- `index_html.h` is a hand-maintained single raw string literal (`R"=====(` ... `)=====`).
-  Do not introduce that closing delimiter inside the HTML, JS or CSS. Keep it consistent with
-  the HTTP/WS protocol in `driver_station_esp32.hpp`.
+- The Driver Station page is edited in `ui/index.html`, never in the generated `index_html_gz.h`.
+  Run `make ui` and commit both files together (generated file, checked for drift in CI; the
+  check compares decompressed content, so a different zlib does not count as drift;
+  `.gitattributes` keeps the HTML at LF line endings on every platform). Keep the
+  page consistent with the HTTP/WS protocol in `driver_station_esp32.hpp`.
 - The fallback templates inside `sync_version.py` mention an old repository URL; they only
   apply when a metadata file is missing. Do not delete the metadata files.
 - `.gitignore` excludes `.build/`, `tests/control_tests`, `connection-test/`, `review/`,

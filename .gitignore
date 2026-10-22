@@ -8,3 +8,4 @@ tuna_test/
 connection-test/
 .claude/
 *.code-workspace
+__pycache__/

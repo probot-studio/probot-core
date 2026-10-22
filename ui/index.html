@@ -1,15 +1,3 @@
-#pragma once
-#ifdef ESP32
-#include <pgmspace.h>
-#else
-#include <avr/pgmspace.h>
-#endif
-
-// Driver Station UI — Probot Studio tasarım dili (site ile ortak header,
-// krem/turuncu palet, 12 kolonluk widget grid'i). Kaynak tasarım:
-// admin ui-test v1.2 mockup'ı; buradaki kopya gerçek WS/HTTP tesisatına
-// bağlıdır (S/T push frame'leri, J binary joystick, HTTP fallback).
-const char MAIN_page[] PROGMEM = R"=====(
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2926,5 +2914,3 @@ const char MAIN_page[] PROGMEM = R"=====(
   </script>
 </body>
 </html>
-
-)=====";

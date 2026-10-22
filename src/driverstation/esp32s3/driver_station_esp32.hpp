@@ -15,7 +15,7 @@
 #include <probot/telemetry/telemetry.hpp>
 #include <probot/telemetry/console.hpp>
 #include <probot/dashboard/dashboard.hpp>
-#include "index_html.h"
+#include "index_html_gz.h"
 
 // Dashboard push cadence and per-tick byte budget (see pushDashboard()).
 #ifndef PROBOT_DASH_PERIOD_MS
@@ -760,9 +760,12 @@ namespace probot::driverstation::esp32 {
       auto* ds = self(req);
       if (!ds->enforceOwner(req)) return ESP_OK;
 
+      // The page is stored gzip-compressed (tools/gen_ui.py); every browser
+      // the Driver Station supports decodes it.
       httpd_resp_set_type(req, "text/html");
-      const char* ptr = MAIN_page;
-      size_t remaining = strlen_P(MAIN_page);
+      httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+      const char* ptr = reinterpret_cast<const char*>(MAIN_page_gz);
+      size_t remaining = MAIN_page_gz_len;
       while (remaining > 0) {
         size_t chunk = (remaining > 2048) ? 2048 : remaining;
         if (httpd_resp_send_chunk(req, ptr, chunk) != ESP_OK) {
