@@ -105,6 +105,11 @@ Biçim [Keep a Changelog](https://keepachangelog.com/), sürümler
   valid time always sets it; later ones only while the robot is stopped
   (not between autonomous and TeleOp). `ds::systemTimeValid()` reports
   whether it has been set since boot.
+- `probot::requestStop()`: stops the active OpMode from code like the
+  Driver Station STOP button (cooperative; cancels a pending INIT or
+  START). `ds::rslState()` reports whether the robot signal light is lit
+  and `ds::commsDisableCount()` how many times a lost Driver Station link
+  stopped the robot since boot.
 
 ### Changed
 - Dashboard schemas have their own size limit, `PROBOT_DASH_MAX_SCHEMA_BYTES`

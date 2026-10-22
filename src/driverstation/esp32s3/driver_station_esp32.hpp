@@ -894,20 +894,24 @@ namespace probot::driverstation::esp32 {
           return conflict(kStopBeforeMode);
         robot::opModes().remember(mode, (uint64_t)id);
       } else if (strcmp(cmd, "init") == 0) {
-        if (!core::canAcceptInit(s.phase, s.status)) return conflict("[PB-E409] INIT requires STOPPED — docs/hatalar#pb-e409");
+        // The status write re-checks its rule atomically: probot::requestStop()
+        // may change the state from another task meanwhile.
+        static constexpr const char* kInitConflict = "[PB-E409] INIT requires STOPPED — docs/hatalar#pb-e409";
+        if (!core::canAcceptInit(s.phase, s.status)) return conflict(kInitConflict);
         if (autoLen > 0) ds->_rs.setAutoPeriodSeconds(now, autoLen);
         // The list may have changed during the last run; never INIT an
         // option that is no longer offered.
         ds::detail::reconcileSelection();
-        ds->_rs.setStatus(now, robot::Status::INIT);
+        if (!ds->_rs.setStatusIf(now, robot::Status::INIT, core::canAcceptInit)) return conflict(kInitConflict);
         ds->_rs.setDeadlineMiss(now, false);
       } else if (strcmp(cmd, "start") == 0) {
-        if (!core::canAcceptStart(s.phase, s.status)) return conflict("[PB-E409] START requires INIT — docs/hatalar#pb-e409");
+        static constexpr const char* kStartConflict = "[PB-E409] START requires INIT — docs/hatalar#pb-e409";
+        if (!core::canAcceptStart(s.phase, s.status)) return conflict(kStartConflict);
         if (autoLen > 0) ds->_rs.setAutoPeriodSeconds(now, autoLen);
-        ds->_rs.setStatus(now, robot::Status::START);
+        if (!ds->_rs.setStatusIf(now, robot::Status::START, core::canAcceptStart)) return conflict(kStartConflict);
       } else if (strcmp(cmd, "stop") == 0) {
-        if (!core::canAcceptStop(s.phase, s.status)) return conflict("[PB-E409] STOP requires INIT or RUN — docs/hatalar#pb-e409");
-        ds->_rs.setStatus(now, robot::Status::STOP);
+        static constexpr const char* kStopConflict = "[PB-E409] STOP requires INIT or RUN — docs/hatalar#pb-e409";
+        if (!ds->_rs.setStatusIf(now, robot::Status::STOP, core::canAcceptStop)) return conflict(kStopConflict);
       } else {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "unknown command");
         return ESP_OK;

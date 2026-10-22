@@ -355,3 +355,17 @@ TEST_CASE(autonomous_expiry_selects_the_preferred_teleop_opmode){
   EXPECT_TRUE(rs.activeOpModeId() == 22);
   reg.resetForTest();
 }
+
+TEST_CASE(ds_link_is_lost_only_after_activity_while_not_stopped){
+  using probot::robot::Status;
+  using probot::core::dsLinkLost;
+  const uint32_t timeout = 10000;
+  EXPECT_TRUE(!dsLinkLost(Status::START, 50000, 0, timeout));       // no DS was ever active
+  EXPECT_TRUE(!dsLinkLost(Status::STOP, 50000, 1000, timeout));     // already stopped
+  EXPECT_TRUE(!dsLinkLost(Status::START, 11000, 1000, timeout));    // exactly the timeout
+  EXPECT_TRUE(dsLinkLost(Status::START, 11001, 1000, timeout));
+  EXPECT_TRUE(dsLinkLost(Status::INIT, 11001, 1000, timeout));
+  // Across the millis() wrap: 0xFFFFF000 is 4096 ms before 0.
+  EXPECT_TRUE(!dsLinkLost(Status::START, 5000, 0xFFFFF000u, timeout));
+  EXPECT_TRUE(dsLinkLost(Status::START, 6000, 0xFFFFF000u, timeout));
+}

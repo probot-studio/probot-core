@@ -116,6 +116,21 @@ namespace probot::ds {
     return wallclock::isSet();
   }
 
+  // The robot signal light is lit (WPILib HAL_GetRSLState): blinking while
+  // a RUN phase may move the robot, solid on otherwise. Tracked whether or
+  // not PROBOT_RSL_PIN is wired; false until the runtime has started.
+  inline bool rslState() {
+    return __atomic_load_n(&robot::g_rsl_on, __ATOMIC_SEQ_CST) != 0;
+  }
+
+  // Times the Driver Station timeout stopped an enabled robot (START sent)
+  // since boot (PB-E303). A timeout during INIT, and a lost link with
+  // PROBOT_DS_TIMEOUT_FORCE_STOP 0 (PB-E304, joystick neutral only), are
+  // not counted.
+  inline uint32_t commsDisableCount() {
+    return __atomic_load_n(&robot::g_comms_disable_count, __ATOMIC_SEQ_CST);
+  }
+
   // Ungated controller input in any phase (see io::rawGamepad()). Returns
   // false when the port (0-5) does not exist or no frame was ever received.
   inline bool rawGamepad(int port, io::GamepadSnapshot& out) {
@@ -125,3 +140,17 @@ namespace probot::ds {
   }
 
 } // namespace probot::ds
+
+namespace probot {
+  // Stop the active OpMode from code, as if the Driver Station pressed STOP:
+  // cooperative (the running hook returns, at most one more loop pass may
+  // run, then the stop hook), and a pending INIT or START is cancelled.
+  // Safe from any task, including a hook. Returns false when there is
+  // nothing to stop, a stop is already in progress or the emergency stop
+  // has latched.
+  inline bool requestStop() {
+    if (ds::isEStopped()) return false;
+    return robot::state().setStatusIf((uint32_t)millis(), robot::Status::STOP,
+                                      core::canRequestStop);
+  }
+}
