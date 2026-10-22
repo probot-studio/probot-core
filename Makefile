@@ -9,6 +9,7 @@ PYTHON      ?= python3
 
 VERSION_FILE        := $(CURDIR)/VERSION
 VERSION_SYNC_SCRIPT := $(CURDIR)/tools/sync_version.py
+UI_GEN_SCRIPT := $(CURDIR)/tools/gen_ui.py
 
 # Examples
 EXAMPLES_DIR   := $(CURDIR)/examples
@@ -29,14 +30,14 @@ EXTRA_FLAGS_COMMON := -DESP32S3 -DARDUINO_USB_MODE=1
 # Example-specific extra flags (function)
 example_flags = $(if $(filter LoopPeriodStress,$(notdir $(1))),-DPROBOT_CLM_NOLOG=1 -DPROBOT_SCHED_NOLOG=1,)
 
-.PHONY: all build build-all _build_single upload clean boards libs serial list help test tests/control_tests
+.PHONY: all build build-all _build_single upload clean boards libs serial list help test tests/control_tests ui
 
 all: help
 
 help:
 	@echo "Usage: make build EXAMPLE=<Name|all>"
 	@echo "Examples directory: $(EXAMPLES_DIR)"
-	@echo "Targets: build, build-all, upload, serial, clean, list"
+	@echo "Targets: build, build-all, upload, serial, clean, list, ui"
 	@echo "Build artifacts: $(BUILD_DIR_BASE)/<Example>"
 
 list:
@@ -62,6 +63,7 @@ build-all:
 _build_single:
 	@echo "==> Building $(EXAMPLE)"
 	$(PYTHON) $(VERSION_SYNC_SCRIPT)
+	$(PYTHON) $(UI_GEN_SCRIPT)
 	$(ARDUINO_CLI) compile --fqbn $(FQBN) --warnings all \
 	  --library $(CURDIR) \
 	  --build-path $(BUILD_DIR_BASE)/$(EXAMPLE) \
@@ -88,6 +90,9 @@ libs:
 
 version-sync:
 	$(PYTHON) $(VERSION_SYNC_SCRIPT)
+
+ui:
+	$(PYTHON) $(UI_GEN_SCRIPT)
 
 tests/control_tests: $(TEST_SOURCES)
 	g++ -std=c++17 -Wall -Wextra -pedantic -I src -I $(TEST_STUB_DIR) -DPROBOT_CLM_NOLOG=1 -DPROBOT_SCHED_NOLOG=1 -DPROBOT_LOGGER_NO_SCHED_ATTACH=1 -DPROBOT_BUILTINLED_EXTERNAL=1 -o $@ $(TEST_SOURCES) $(TEST_EXTRA_SOURCES)

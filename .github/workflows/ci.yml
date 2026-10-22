@@ -25,6 +25,9 @@ jobs:
         with:
           python-version: '3.x'
 
+      - name: Check the generated Driver Station page
+        run: python3 tools/gen_ui.py --check
+
       - name: Install Arduino CLI
         if: ${{ env.ACT != 'true' }}
         run: |
