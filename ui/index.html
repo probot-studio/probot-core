@@ -588,7 +588,10 @@
     .dk-al.e b{background:var(--stop);}
     .dk-al.w b{background:var(--amber);color:var(--ink);}
     .dk-al.i b{background:var(--info);}
+    .dk-cv{display:block;width:100%;max-width:520px;margin:6px 0;border:1px solid var(--line);border-radius:10px;background:var(--surface);}
+    .dk-sw{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:middle;}
     .btn.dk-stop{background:#fff;color:var(--stop);border:1px solid var(--stop);box-shadow:0 2px 0 var(--stop);}
+    .btn.dk-stop[aria-disabled=true]{opacity:0.55;cursor:default;}
 
     /* ================= OVERLAYS ================= */
     .overlay{position:fixed;inset:0;z-index:9999;display:none;flex-direction:column;
@@ -2333,7 +2336,8 @@
      DASHBOARD UI - "Veri" page: topic tree keyed on '/' segments. Topics
      with TUNABLE|MUTABLE flags get editors that send 'W' on commit
      (Enter/blur/change) and stay pending until the next 'V' or a 'K'.
-     A sibling ".type" string picks a widget (Selectable, Command, Alerts)
+     A sibling ".type" string picks a widget (Selectable, Command, Alerts, Scheduler,
+     Field2d, Mechanism2d; WPILib 2027 layouts)
      or an order (PIDController).
      Text editors are textareas: they take Space only while the robot is
      STOPPED; in any other phase Space is still the e-stop key.
@@ -2403,6 +2407,244 @@
     return row;
   }
   function dkKid(n,k){return n.k[k]&&n.k[k].t;}
+  function dkFin(x){return typeof x==='number'&&isFinite(x);}
+  function dkHex(c,def){return typeof c==='string'&&/^#[0-9a-f]{6}$/i.test(c)?c:def;}
+  /* Canvas sized to its box width and aspect(); repaints at most once a frame and on resize. */
+  function dkCanvas(aspect,draw){
+    var cv=dkEl('canvas','dk-cv'),raf=0;
+    function paint(){
+      raf=0;
+      var w=cv.clientWidth,r=window.devicePixelRatio||1,h,g;
+      if(!w) return;
+      /* A 1 px change can toggle the page scrollbar, which changes w again: keep the old height. */
+      h=Math.round(w*aspect());
+      if(Math.abs(h-cv.clientHeight)>1) cv.style.height=h+'px'; else h=cv.clientHeight||h;
+      if(cv.width!==Math.round(w*r)||cv.height!==Math.round(h*r)){cv.width=Math.round(w*r);cv.height=Math.round(h*r);}
+      g=cv.getContext('2d');g.setTransform(r,0,0,r,0,0);g.clearRect(0,0,w,h);
+      draw(g,w,h);
+    }
+    cv.dkPaint=function(){if(!raf)raf=requestAnimationFrame(paint);};
+    if(window.ResizeObserver) new ResizeObserver(cv.dkPaint).observe(cv);
+    return cv;
+  }
+  var DK_COLORS=['#FF4500','#1a73e8','#28a745','#8e44ad','#00897b','#D63600'];
+  /* Pose2d arrays (struct:Pose2d[]): 24 bytes per pose, {f64 x m, f64 y m, f64 rotation rad}.
+     null when the length is not a whole number of poses. */
+  function dkPoses(t){
+    var b=t.val,out=[],dv,o,x,y,r;
+    if(!(b instanceof Uint8Array)||b.length%24) return null;
+    dv=new DataView(b.buffer,b.byteOffset,b.length);
+    for(o=0;o<b.length;o+=24){
+      x=dv.getFloat64(o,true);y=dv.getFloat64(o+8,true);r=dv.getFloat64(o+16,true);
+      out.push([x,y,r,dkFin(x)&&dkFin(y)&&dkFin(r)]);
+    }
+    return out;
+  }
+  function dkPoseBytes(p){
+    var out=new Uint8Array(24*p.length),dv=new DataView(out.buffer);
+    p.forEach(function(q,i){dv.setFloat64(i*24,q[0],true);dv.setFloat64(i*24+8,q[1],true);dv.setFloat64(i*24+16,q[2],true);});
+    return out;
+  }
+  function dkDeg(r){return r*180/Math.PI;}
+  /* WPILib 2027 Field2d: one struct:Pose2d[] topic per object ("Robot" first; names may hold '/').
+     Field size and origin are not published: the view keeps the origin and grows to fit every pose
+     seen within 1 km (farther ones are listed, not drawn). Up to 8 poses are drawn as robots, more
+     as a path. A writable object (tunable side) takes dragged poses or typed ones; the whole array
+     is written, built on the last array sent while that write is pending. Touch drags need the
+     drag toggle so the canvas still scrolls the page. The program may set the pose again on its
+     next loop: that is not an error. A rebuild (a new topic) ends a drag in progress. */
+  function dkField(n){
+    var objs=[];
+    (function walk(x,pre){
+      Object.keys(x.k).forEach(function(k){
+        var c=x.k[k];
+        if(k==='.type') return;
+        if(c.t&&c.t.vt===6&&c.t.type==='struct:Pose2d[]') objs.push({name:pre+k,t:c.t});
+        walk(c,pre+k+'/');
+      });
+    })(n,'');
+    if(!objs.length) return null;
+    objs.sort(function(a,b){return (b.name==='Robot')-(a.name==='Robot')||(a.name<b.name?-1:a.name>b.name?1:0);});
+    objs.forEach(function(o,i){o.color=DK_COLORS[i%DK_COLORS.length];o.rw=(o.t.flags&6)===6;o.hold={};});
+    var box=dkEl('div'),bb={x0:0,y0:0,x1:2,y1:2},view=null,drag=null,touchDrag=false;
+    /* The array new writes start from: the last one sent while it is pending, else the robot's. */
+    function base(o){return o.t.pend&&o.sent?o.sent.map(function(q){return q.slice();}):dkPoses(o.t);}
+    /* Drawable poses with their index; held drag positions replace theirs until the echo. */
+    function drawn(o){
+      var p=dkPoses(o.t)||[];
+      return p.map(function(q,i){var h=o.hold[i];return h?[h[0],h[1],q[2],true,i]:q.concat(i);})
+        .filter(function(q){return q[3]&&Math.abs(q[0])<=1000&&Math.abs(q[1])<=1000;});
+    }
+    function xy(q){return '('+q[0].toFixed(2)+', '+q[1].toFixed(2)+')';}
+    function aspect(){return Math.min(1,Math.max(0.35,(bb.y1-bb.y0)/(bb.x1-bb.x0)));}
+    var cv=dkCanvas(aspect,function(g,w,h){
+      var m=0.5,sx=bb.x1-bb.x0+2*m,sy=bb.y1-bb.y0+2*m,s=Math.min(w/sx,h/sy),
+          ox=(w-sx*s)/2-(bb.x0-m)*s,oy=h-(h-sy*s)/2+(bb.y0-m)*s,css=getComputedStyle(document.documentElement),
+          raw=Math.max(sx,sy)/12,e=Math.pow(10,Math.floor(Math.log10(raw))),f=raw/e,
+          step=Math.max(1,(f<=1?1:f<=2?2:f<=5?5:10)*e),k; /* 1, 2, 5 x 10^n m: at most about 12 lines */
+      function X(x){return ox+x*s;} function Y(y){return oy-y*s;}
+      view={ox:ox,oy:oy,s:s};
+      g.lineWidth=1;g.strokeStyle=css.getPropertyValue('--line');
+      for(k=Math.ceil((bb.x0-m)/step)*step;k<=bb.x1+m;k+=step){g.beginPath();g.moveTo(X(k),0);g.lineTo(X(k),h);g.stroke();}
+      for(k=Math.ceil((bb.y0-m)/step)*step;k<=bb.y1+m;k+=step){g.beginPath();g.moveTo(0,Y(k));g.lineTo(w,Y(k));g.stroke();}
+      g.strokeStyle=css.getPropertyValue('--muted');g.beginPath();g.moveTo(X(0),0);g.lineTo(X(0),h);g.moveTo(0,Y(0));g.lineTo(w,Y(0));g.stroke();
+      objs.forEach(function(o){
+        var p=drawn(o);
+        g.strokeStyle=g.fillStyle=o.color;g.lineWidth=2;g.lineJoin=g.lineCap='round';
+        if(p.length>8){
+          g.beginPath();p.forEach(function(q,i){if(i)g.lineTo(X(q[0]),Y(q[1]));else g.moveTo(X(q[0]),Y(q[1]));});g.stroke();
+          return;
+        }
+        p.forEach(function(q){
+          var a=-q[2],x=X(q[0]),y=Y(q[1]),r=9;
+          g.beginPath();
+          g.moveTo(x+r*Math.cos(a),y+r*Math.sin(a));
+          g.lineTo(x+r*Math.cos(a+2.5),y+r*Math.sin(a+2.5));
+          g.lineTo(x+r*Math.cos(a-2.5),y+r*Math.sin(a-2.5));
+          g.closePath();g.fill();
+        });
+      });
+    });
+    cv.setAttribute('role','img');cv.setAttribute('aria-label','Saha görünümü (konumlar aşağıda)');
+    box.appendChild(cv);
+    function local(e){var b=cv.getBoundingClientRect();return [e.clientX-b.left-cv.clientLeft,e.clientY-b.top-cv.clientTop];}
+    if(objs.some(function(o){return o.rw;})){
+      var tg=dkEl('button','btn btn-sm','Dokunarak sürükle');
+      tg.setAttribute('aria-pressed','false');
+      tg.onclick=function(){
+        touchDrag=!touchDrag;tg.setAttribute('aria-pressed',String(touchDrag));
+        cv.style.touchAction=touchDrag?'none':'';
+      };
+      box.insertBefore(tg,cv);
+      cv.addEventListener('pointerdown',function(e){
+        if(drag||!view||e.button!==0||(e.pointerType==='touch'&&!touchDrag)) return;
+        var c=local(e),best=196;
+        objs.forEach(function(o){
+          var p=drawn(o);
+          if(!o.rw||p.length>8) return;
+          p.forEach(function(q){
+            var dx=view.ox+q[0]*view.s-c[0],dy=view.oy-q[1]*view.s-c[1],d=dx*dx+dy*dy;
+            if(d<best){best=d;drag={o:o,i:q[4],id:e.pointerId};}
+          });
+        });
+        if(!drag) return;
+        e.preventDefault();cv.setPointerCapture(e.pointerId);
+      });
+      cv.addEventListener('pointermove',function(e){
+        if(!drag||e.pointerId!==drag.id) return;
+        var c=local(e);drag.o.hold[drag.i]=[(c[0]-view.ox)/view.s,(view.oy-c[1])/view.s];cv.dkPaint();
+      });
+      function drop(e){
+        if(!drag||e.pointerId!==drag.id) return;
+        var o=drag.o,i=drag.i,h=o.hold[i],p=base(o);
+        drag=null;
+        if(e.type!=='pointerup'||!p||!h||i>=p.length){delete o.hold[i];cv.dkPaint();return;}
+        p[i]=[h[0],h[1],p[i][2]];
+        dkWrite(o.t,dkPoseBytes(p));
+        if(o.t.pend) o.sent=p; else o.hold={};   /* not sent: show the robot's poses again */
+        o.t.ui(true);
+      }
+      cv.addEventListener('pointerup',drop);cv.addEventListener('pointercancel',drop);
+    }
+    objs.forEach(function(o){
+      var r=box.appendChild(dkEl('div','dk-row')),k=r.appendChild(dkEl('span','dk-k')),v=r.appendChild(dkEl('span','dk-v'));
+      k.appendChild(dkEl('i','dk-sw')).style.background=o.color;k.appendChild(document.createTextNode(o.name));
+      o.v=v;o.s=r.appendChild(dkEl('span','dk-s'));o.row=r;
+      if(!o.rw) return;
+      /* "x, y, derece" per pose, poses separated by ';'. Empty clears the object. A textarea, so
+         Space types only while the robot is stopped (the global e-stop key rule). */
+      o.ed=v.appendChild(dkEl('textarea','dk-ed'));o.ed.rows=1;
+      o.ed.setAttribute('aria-label',o.name+' konumu: x, y metre, açı derece; pozlar ; ile ayrılır');
+      o.ed.onkeydown=function(e){if(e.key==='Enter'){e.preventDefault();o.ed.blur();}};
+      o.ed.onchange=function(){
+        try{
+          var p=o.ed.value.trim()?o.ed.value.split(';').map(function(x){
+            var a=x.split(',').map(function(y){return dkParse(4,y,{});});
+            if(a.length!==3) throw 'Her poz için x, y, açı girin';
+            return [a[0],a[1],a[2]*Math.PI/180];
+          }):[];
+          dkWrite(o.t,dkPoseBytes(p));
+          if(o.t.pend){o.sent=p;o.hold={};}
+        }catch(e){o.t.err=typeof e==='string'?e:'Geçersiz değer';o.t.ui(true);}
+      };
+    });
+    /* One refresh for all objects; force (an object) rewrites only that object's editor. */
+    function ui(force){
+      objs.forEach(function(o){
+        var p=dkPoses(o.t),ok,txt;
+        if(!o.t.pend&&!(drag&&drag.o===o)){o.hold={};o.sent=null;}
+        txt=o.t.val===undefined?'--':!p?'Geçersiz uzunluk':null;
+        if(txt){
+          if(!o.ed) o.v.textContent=txt;
+          else{o.ed.placeholder=txt;if(force===o||document.activeElement!==o.ed)o.ed.value='';}
+          dkStat(o.row,o.s,o.t,'');return;
+        }
+        ok=p.filter(function(q){return q[3];});
+        ok.filter(function(q){return Math.abs(q[0])<=1000&&Math.abs(q[1])<=1000;}).forEach(function(q){
+          bb.x0=Math.min(bb.x0,q[0]);bb.x1=Math.max(bb.x1,q[0]);bb.y0=Math.min(bb.y0,q[1]);bb.y1=Math.max(bb.y1,q[1]);
+        });
+        if(o.ed){
+          o.ed.placeholder='';
+          if(force===o||document.activeElement!==o.ed)
+            o.ed.value=ok.map(function(q){return q[0].toFixed(2)+', '+q[1].toFixed(2)+', '+dkDeg(q[2]).toFixed(1);}).join('; ');
+        }else{
+          o.v.textContent=ok.length===1?'x '+ok[0][0].toFixed(2)+' m · y '+ok[0][1].toFixed(2)+' m · '+dkDeg(ok[0][2]).toFixed(1)+'°'
+            :ok.length?ok.length+' poz: '+xy(ok[0])+' → '+xy(ok[ok.length-1])+' m':'--';
+        }
+        dkStat(o.row,o.s,o.t,'');
+      });
+      cv.dkPaint();
+    }
+    objs.forEach(function(o){o.t.ui=function(f){ui(f?o:null);};});
+    return box;
+  }
+  /* WPILib 2027 Mechanism2d (telemetry only): dims [w, h], backgroundColor; a root is a subtable
+     without ".type" holding position [x, y]; a ligament is a subtable with ".type" "line", angle
+     (deg, relative to the parent; a root points along +x), length, color, weight px, nested to any
+     depth. Anything else, including user names that collide with these keys, is ignored. */
+  function dkMech(n){
+    var dims=dkKid(n,'dims'),bg=dkKid(n,'backgroundColor'),all=[];
+    if(!dims||dims.vt!==10) return null;
+    (function walk(x){Object.keys(x.k).forEach(function(k){var c=x.k[k];if(c.t)all.push(c.t);walk(c);});})(n);
+    function num(x,k,def){var t=dkKid(x,k);return t&&dkFin(t.val)?t.val:def;}
+    function size(){var d=dims.val||[];return dkFin(d[0])&&dkFin(d[1])&&d[0]>0&&d[1]>0?d:null;}
+    function lines(x,x0,y0,a0,cb,path){
+      Object.keys(x.k).sort().forEach(function(k){
+        var c=x.k[k],ty=dkKid(c,'.type');
+        if(!ty||ty.val!=='line') return;
+        var a=a0+num(c,'angle',0),l=num(c,'length',0),r=a*Math.PI/180,x1=x0+l*Math.cos(r),y1=y0+l*Math.sin(r);
+        cb(c,x0,y0,x1,y1,path+'/'+k,a);
+        lines(c,x1,y1,a,cb,path+'/'+k);
+      });
+    }
+    function each(cb){
+      Object.keys(n.k).sort().forEach(function(k){
+        var c=n.k[k],p=dkKid(c,'position'),v=p&&p.val;
+        if(k==='.type'||dkKid(c,'.type')||!p||p.vt!==10||!v||!dkFin(v[0])||!dkFin(v[1])) return;
+        lines(c,v[0],v[1],0,cb,k);
+      });
+    }
+    var cv=dkCanvas(function(){var d=size();return d?Math.min(1.5,Math.max(0.2,d[1]/d[0])):0.5;},function(g,w,h){
+      var d=size(),s,ox,oy;
+      g.fillStyle=dkHex(bg&&bg.val,'#000020');g.fillRect(0,0,w,h);
+      if(!d) return;
+      s=Math.min(w/d[0],h/d[1]);ox=(w-d[0]*s)/2;oy=h-(h-d[1]*s)/2;g.lineCap='round';
+      each(function(c,x0,y0,x1,y1){
+        var t=dkKid(c,'color');
+        g.strokeStyle=dkHex(t&&t.val,'#eb8934');g.lineWidth=Math.min(30,Math.max(1,num(c,'weight',6)));
+        g.beginPath();g.moveTo(ox+x0*s,oy-y0*s);g.lineTo(ox+x1*s,oy-y1*s);g.stroke();
+      });
+    });
+    cv.setAttribute('role','img');
+    function ui(){
+      var parts=[];
+      each(function(c,x0,y0,x1,y1,p,a){parts.push(p+': '+dkNum(+a.toFixed(1))+'°, '+dkNum(num(c,'length',0)));});
+      cv.setAttribute('aria-label','Mekanizma: '+(parts.join('; ')||'boş'));
+      cv.dkPaint();
+    }
+    all.forEach(function(t){t.ui=ui;});
+    return cv;
+  }
   /* Widget for a folder whose ".type" child names a known type, else null. */
   function dkTyped(n){
     var ty=dkKid(n,'.type'),row=dkEl('div','dk-row'),info=dkEl('span','dk-k'),v=dkEl('span','dk-v'),s=dkEl('span','dk-s'),w,ui;
@@ -2454,7 +2696,56 @@
       };
       lv.forEach(function(x){x[0].ui=ui;});
       return list;
-    }else return null;
+    }else if(ty==='Scheduler'){
+      /* WPILib scheduler layout: running commands; a tunable table cancels by writing [id] to Cancel.
+         The robot keeps only the newest undrained write and an echo cannot tell which write it
+         answers, so every write carries all ids asked for (kept on the topic across rebuilds)
+         until they stop running or 2 s pass without a pending write. A refusal or failed send
+         forgets them. Cancel's own value is never read (the robot sets it back to []). Names and Ids
+         are separate topics and may pair wrongly for one frame. */
+      var cn=dkKid(n,'Names'),ci=dkKid(n,'Ids'),cc=dkKid(n,'Cancel'),box=dkEl('div'),head=dkEl('div','dk-row'),lastKey;
+      if(!cn||!ci||cn.vt!==11||ci.vt!==8) return null;
+      if(cc&&(cc.vt!==8||(cc.flags&6)!==6)) cc=null;
+      if(cc&&!cc.dkSent) cc.dkSent=dkMap();
+      head.appendChild(info);head.appendChild(s);box.appendChild(head);
+      var rows=box.appendChild(dkEl('div'));
+      ui=function(){
+        var names=cn.val||[],ids=(ci.val||[]).map(String),c=Math.min(names.length,ids.length),i,key,now=Date.now(),
+            sent=cc?cc.dkSent:dkMap(),act=document.activeElement,fid=act&&rows.contains(act)?act.dkId:null,at=-1,bs;
+        if(cc) Object.keys(sent).forEach(function(k){
+          if(cc.err||ids.indexOf(k)<0||(!cc.pend&&now-sent[k]>2000)) delete sent[k];
+        });
+        key=names.slice(0,c).join('\n')+'\n'+ids.slice(0,c).join(',')+'\n'+Object.keys(sent).join(',');
+        info.textContent=c?'Çalışan komut: '+c:'Çalışan komut yok';
+        if(cc) dkStat(head,s,cc,'');
+        if(key===lastKey) return;
+        bs=rows.querySelectorAll('button');
+        for(i=0;i<bs.length;i++) if(bs[i]===act) at=i;
+        lastKey=key;rows.innerHTML='';
+        for(i=0;i<c;i++) (function(nm,id){
+          var r=rows.appendChild(dkEl('div','dk-row'));
+          r.appendChild(dkEl('span','dk-k',nm)).title='id '+id;
+          if(!cc) return;
+          var b=r.appendChild(dkEl('button','btn btn-sm dk-stop',sent[id]?'İptal ediliyor':'İptal'));
+          b.dkId=id;b.setAttribute('aria-label','İptal et: '+nm);b.setAttribute('aria-disabled',sent[id]?'true':'false');
+          b.onclick=function(){
+            if(cc.dkSent[id]) return;
+            cc.dkSent[id]=Date.now();
+            dkWrite(cc,dkEnc(8,Object.keys(cc.dkSent)));
+            setTimeout(function(){cc.ui();},2100);
+          };
+        })(names[i],ids[i]);
+        /* Keep keyboard focus on the same command, or the row that took its place. */
+        if(fid==null) return;
+        bs=rows.querySelectorAll('button');
+        for(i=0;i<bs.length;i++) if(bs[i].dkId===fid) at=i;
+        if(bs.length) bs[Math.min(at,bs.length-1)].focus();
+      };
+      [cn,ci].concat(cc?[cc]:[]).forEach(function(x){x.ui=ui;});
+      return box;
+    }else if(ty==='Field2d') return dkField(n);
+    else if(ty==='Mechanism2d') return dkMech(n);
+    else return null;
     w.ui=ui;
     row.appendChild(info);row.appendChild(v);row.appendChild(s);
     return row;

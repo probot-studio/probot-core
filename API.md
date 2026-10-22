@@ -475,12 +475,37 @@ ya da odaktan çıkınca gönderilir; robot değeri geri yollayana dek
 `max`, `step`, `unit` editöre uygulanır. `struct:X` değerleri `structschema`
 şemasıyla alanlarına ayrılır. Kardeş `.type` topic'i `Selectable` ise
 `options` listesinden `selected` yazan bir seçim kutusu, `Command` ise
-`running` değerini çeviren bir düğme gösterilir. `Alerts` klasöründeki
-`errors`, `warnings`, `infos` (string[]) etkin uyarıları seviyesiyle
-listeler; `PIDController` klasöründe kazançlar (`p`, `i`, `d`, `izone`,
-`setpoint`) önce gelir ve `/Tunables/<ad>` altında, aynı adlı
-`/Telemetry/<ad>` tablosundaki `measurement` ile `error` de canlı görünür. Metin kutularına boşluk
-yalnız robot STOPPED iken yazılır; diğer fazlarda Space yine acil
+`running` değerini çeviren bir düğme gösterilir. Widget gösteren
+klasörün diğer topic'leri ağaçta ayrıca listelenmez. `Alerts` klasöründeki
+`errors`, `warnings`, `infos` (string[], en az biri) etkin uyarıları
+seviyesiyle listeler; `PIDController` klasöründe kazançlar (`p`, `i`, `d`,
+`izone`, `setpoint`) ve ardından durum (`measurement`, `error`, ...) WPILib
+sırasıyla gelir, diğerleri alfabetik; ayrıca `/Tunables/<ad>` altında, aynı adlı
+`/Telemetry/<ad>` tablosundaki `measurement` ile `error` de canlı görünür.
+`Scheduler` klasöründe `Names` (string[]) ve `Ids` (int64[]) çalışan
+komutları listeler; klasörde `TUNABLE | MUTABLE` bir `Cancel` (int64[])
+varsa her komutun yanında bir İptal düğmesi o komutun id'sini `Cancel`'a
+yazar (komut durana dek sonraki yazmalar önceki id'leri de taşır, çünkü
+robot alınmamış bir yazmanın yerine yenisini koyar; `Cancel`'ın kendi
+değeri okunmaz). Düğmeye basıldıktan 2 saniye sonra, robot yazmayı
+almışsa ve komut hâlâ çalışıyorsa düğme yeniden "İptal" olur. Düzenler WPILib 2027'ninkidir.
+`Field2d` klasöründeki her `struct:Pose2d[]` (raw) topic bir nesnedir (poz
+başına 24 bayt: `x` m, `y` m, açı radyan, float64; `Robot` önce): sahada
+çizilir; 8'den çok pozu olan nesne yol olarak çizilir, 1 km'den uzak
+pozlar çizilmez, boyu 24'ün katı olmayan değer geçersiz sayılır. Salt
+okunur nesnenin altında tek pozun konumu ya da poz sayısı ile ilk ve son
+nokta yazılır. Yazılabilir nesnenin (`TUNABLE | MUTABLE`) altında pozları
+`x, y, derece` biçiminde (pozlar `;` ile ayrılır) düzenleyen bir kutu
+vardır; 8'e kadar pozu olan nesnenin pozları sahada da sürüklenebilir
+(dokunmatik ekranda "Dokunarak sürükle" açıkken). Dizinin tamamı yazılır.
+Program pozu sonraki döngüde yeniden verirse poz eski yerine döner; bu hata
+değildir. Saha boyutu ve görseli yayımlanmaz: görünüm pozlara göre büyür.
+`Mechanism2d` klasörü WPILib 2027 düzeniyle (`dims` double[] olmalı,
+`backgroundColor`, `.type` taşımayan ve `position` [x, y] taşıyan kökler,
+`.type` = `line` olan iç içe `angle`, `length`, `color`, `weight` kolları)
+çizilir. Beklenen alt topic'ler eksik ya da tipi yanlışsa klasör düz ağaç
+olarak gösterilir. Metin kutularına boşluk yalnız robot STOPPED iken
+yazılır; diğer fazlarda Space yine acil
 durdurmadır. Protokol aşağıda ("WS çerçeveleri").
 
 ```cpp
@@ -512,7 +537,11 @@ Değer tipleri (`ValueType`, little-endian): 1 boolean (u8), 2 int (i64),
 u16 uzunluk + baytlar). Bayraklar: `TELEMETRY` 1, `TUNABLE` 2,
 `MUTABLE` 4, `ROBUST` 8, `KEEP_DUPLICATES` 16, `PERSISTENT` 32. DS yalnız
 `TUNABLE | MUTABLE` topic'lere yazabilir; uzunluğu tipine uymayan yazma
-(ör. 8 bayt olmayan double) `'K'` 4 ile reddedilir. Yazma kuyruğunda topic başına
+(ör. 8 bayt olmayan double) `'K'` 4 ile reddedilir. Raw (6) yazmaların
+uzunluğu denetlenmez (yalnız `PROBOT_DASH_MAX_VALUE`): DS dışındaki bir
+istemci her uzunlukta yazabilir, bu yüzden robot kodu `w.len` değerini
+denetler (ör. `struct:Pose2d[]` için 24'ün katı) ve uymayanı `rejectWrite`
+ile reddeder. Yazma kuyruğunda topic başına
 en son değer kalır; uygulanan her yazmadan sonra robotun değeri DS'e
 yeniden gönderilir.
 
