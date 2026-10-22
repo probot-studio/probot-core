@@ -291,6 +291,7 @@ hook'u tamamlanmış evre için daima `phase` kullanılmalıdır.
 | `ds::matchTimeSeconds()` | Otonom süresinden kalan saniye (AUTO_RUN'da); zamanlı dönem yoksa `-1` |
 | `ds::packetSeq()` | Tek sayaç: her portun her DS joystick (`'J'`) paketinde (iki kumandayla her gönderimde iki kez) ve kabul edilen mod/OpMode/INIT/START/STOP komutunda artar (acil durdurma ve reboot isteğinde artmaz) |
 | `ds::rawGamepad(port, out)` | Kapısız son joystick karesi, her fazda (`port` 0-5). Port yoksa ya da kare yoksa `false` |
+| `ds::systemTimeValid()` | Sistem saati (`time()`, `gettimeofday()`) gerçek zamanı tutuyor mu. Robotta pil destekli saat yok: DS sayfası bağlanınca tarayıcının saatini gönderir. İlk geçerli saat her zaman kurulur, sonrakiler yalnız robot durmuşken (STOPPED; otonom ile TeleOp arası sayılmaz), böylece maç sırasında saat atlamaz. O zamana dek `false`: güç verilince `time()` 1970'ten sayar; yazılımla yeniden başlatmada (DS'ten reboot, PB-E305, panic/watchdog) eski gerçek zamandan devam edebilir ama yine geçerli sayılmaz. Dosya adı ya da kayıt zamanı yazmadan önce bakın. Saat UTC'dir; yerel saat için sketch `setenv("TZ", "<+03>-3", 1); tzset();` çağırır |
 
 `probot::io::rawGamepad(port)` aynı kapısız kaynağın servisidir (`port`
 verilmezse 0). Menü, otonom
@@ -600,9 +601,11 @@ Sahip düştüğünde gamepad verisi anında sıfırlanır.
           değerleri ile robotta duran tüm konsol satırları yeniden
           gönderilir. Sayfa her bağlantıda, bilmediği bir dashboard id'si
           ya da konsolda boşluk gördüğünde yollar
+'U' 0x55  duvar saati: [1..8] i64 tarayıcının UTC zamanı, Unix ms (LE).
+          Sayfa her bağlantıda yollar; 2024-2100 dışı yok sayılır
 ```
 
-`'J'`/`'N'`/`'P'` en çok 68 bayttır; yalnız `'W'` bundan uzun olabilir: en
+`'J'`/`'N'`/`'P'`/`'U'` en çok 68 bayttır; yalnız `'W'` bundan uzun olabilir: en
 çok 68 ile 4 + `dashMax` (`'S'` çerçevesinde) arasından büyük olanı kadar. Bu
 sınırı aşan çerçeve bağlantıyı kapatır; sınır içinde kalıp değeri `dashMax`
 bayttan uzun olan `'W'` `'K'` 4 ile reddedilir. Robot açılışta büyük çerçeve

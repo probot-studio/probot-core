@@ -9,6 +9,7 @@
 #include <probot/robot/state.hpp>
 #include <probot/dashboard/dashboard.hpp>
 #include <probot/telemetry/console.hpp>
+#include <probot/core/wall_clock.hpp>
 
 namespace probot::driverstation::esp32 {
 
@@ -34,6 +35,8 @@ namespace probot::driverstation::esp32 {
    *             code applies it with dashboard::drainWrites().
    *   'Q' 0x51  resync: re-send every dashboard schema, announce and value,
    *             and every console line still held.
+   *   'U' 0x55  wall clock: [1..8] i64 browser UTC time in Unix ms (LE);
+   *             sets the system clock (see probot/core/wall_clock.hpp).
    *
    * Robot -> client binary frames (sent by the DS push task via
    * sendToAll; first byte = type):
@@ -275,6 +278,14 @@ namespace probot::driverstation::esp32 {
           probot::dashboard::detail::requestResync();
           probot::console::detail::requestResend();
           break;
+        case probot::wallclock::detail::kFrame: {
+          int64_t unixMs;
+          if (probot::wallclock::detail::decodeFrame(buf, frame.len, unixMs)) {
+            auto s = robot::state().read();
+            probot::wallclock::detail::setFromDs(unixMs, s.phase, s.status);
+          }
+          break;
+        }
         default:
           break;
       }

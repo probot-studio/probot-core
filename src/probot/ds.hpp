@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <Arduino.h>
 #include <probot/core/lifecycle.hpp>
+#include <probot/core/wall_clock.hpp>
 #include <probot/io/gamepad.hpp>
 #include <probot/robot/opmodes.hpp>
 #include <probot/robot/state.hpp>
@@ -105,6 +106,14 @@ namespace probot::ds {
   // INIT, START or STOP command (not on e-stop or reboot requests).
   inline uint32_t packetSeq() {
     return __atomic_load_n(&robot::g_ds_packet_seq, __ATOMIC_SEQ_CST);
+  }
+
+  // The system clock (time(), gettimeofday()) holds real UTC time: a Driver
+  // Station has set it since boot. Check it before naming a file or
+  // stamping a record. The first valid time sets it; later ones only while
+  // the robot is stopped (not between autonomous and TeleOp).
+  inline bool systemTimeValid() {
+    return wallclock::isSet();
   }
 
   // Ungated controller input in any phase (see io::rawGamepad()). Returns
