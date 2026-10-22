@@ -502,7 +502,8 @@ drainWrites([](const Write& w, void*) {
 | `setProperties(id, json)` / `setFlags(id, flags)` | Yeniden duyurur |
 | `addSchema(name, type, data, len)` / `hasSchema(name)` | `struct:X` ve `proto:X` şemaları; en çok `PROBOT_DASH_MAX_SCHEMA_BYTES`, havuzdan (`PROBOT_DASH_POOL_BYTES`) yer alır. Sığmazsa `false` |
 | `drainWrites(fn, ctx)` | DS yazmalarını sırayla `fn`'e verir; `data` yalnız `fn` içinde geçerli. Tek bir task'tan çağırın |
-| `rejectWrite(id, reason)` | DS'e `'K'` reddi gönderir |
+| `rejectWrite(id, reason)` | DS'e `'K'` reddi gönderir; topic'e başka yazma verilmeden önce çağırın. `fn` içinde ya da ~2 saniye içinde reddedilen DS yazması kaydedilmez. Geri yüklenen `PERSISTENT` değerde çerçeve gitmez, kayıt silinir |
+| `clearPersisted()` | Kayıtlı bütün `PERSISTENT` değerleri, henüz alınmamış geri yüklemeleri ve henüz kaydedilmemiş DS değerlerini siler; topic'ler değerini korur, sonraki DS yazması yeniden kaydedilir. Flash'a yazar: robot dururken ya da bir Init hook'unda çağırın (çıkışlar o sırada nötrdür) |
 | `stats()` | topic sayısı, bayt kullanımı, düşürülenler |
 
 Değer tipleri (`ValueType`, little-endian): 1 boolean (u8), 2 int (i64),
@@ -514,6 +515,38 @@ u16 uzunluk + baytlar). Bayraklar: `TELEMETRY` 1, `TUNABLE` 2,
 (ör. 8 bayt olmayan double) `'K'` 4 ile reddedilir. Yazma kuyruğunda topic başına
 en son değer kalır; uygulanan her yazmadan sonra robotun değeri DS'e
 yeniden gönderilir.
+
+`PERSISTENT` topic'lerin değeri yeniden başlatmada korunur (NVS, `pb_dash`
+alanı). `publish()` kayıtlı değeri yol, değer tipi ve tip yazısı tutuyorsa
+bir yazma olarak kuyruğa koyar (yazma kuyruğu sınırından yer almaz):
+`publish()` sonrasındaki ilk `drainWrites()` onu DS yazması gibi verir,
+robot kodu uygular ve `set()` ile yayınlar. Reddedilirse (`rejectWrite`, bu
+topic için başka yazma verilmeden önce) kayıt silinir.
+
+Yalnız robot kodunun kabul ettiği DS yazmaları kaydedilir: `drainWrites()`
+ile verilen yazma, reddedilmezse (`rejectWrite` yazmayı alan `fn` içinde
+ya da topic'e sonraki yazma verilmeden ve en geç ~2 saniye içinde)
+kaydedilir. Kaydedilen, DS'in yazdığı değerdir; robotun `set()` ile
+verdiği değer hiçbir zaman kaydedilmez ve kaydı değiştirmez. Kayıt robot
+bir OpMode çalıştırmıyorken (durmuş ya da acil durdurulmuş) yazılır, çünkü
+flash'a yazma iki çekirdeği de kısa süre durdurur; topic'e bekleyen bir
+yazma varken (henüz `drainWrites()` ile alınmamış) yazılmaz. Sürüş
+sırasında yapılan ayar robot durunca kaydedilir; o arada güç giderse ya da
+topic `unpublish()` edilirse kaybolur. Geri yükleme yalnız topic ilk
+açılırken olur; `setFlags()` ile sonradan eklenen `PERSISTENT` yalnız
+sonraki DS yazmalarını kaydeder. Kayıt okunamazsa korunur ve bir kez
+bildirilir; DS'ten yeni değer yazılınca üstüne yazılır. NVS alanı küçüktür
+(varsayılan bölümde ~20 KB, WiFi sürücüsü ve DS kanal ayarı gibi diğer
+NVS kullanıcılarıyla ortak): kalıcı değerler en çok 2048 bayt olur (ve
+`PROBOT_DASH_MAX_VALUE` kadar, varsayılan 1024); sayı ve kısa metin tutun.
+`PROBOT_DASH_MAX_VALUE` sonradan kayıtlı bir değerin boyutunun altına
+indirilirse o değer geri yüklenmez. Kaydedilmeyi bekleyen değerler topic
+başına en çok iki değer kadar bellek kullanır (her biri en çok 2048 bayt;
+havuz sınırına sayılmaz). 2048 bayttan büyük bir değer saklanmaz ve hemen
+bildirilir; yazılamayan değer konsola PB-E308 yazar ve DS yeni bir değer
+yazana dek yeniden denenmez. Kayıt için bellek ayrılamazsa (PB-E308)
+saklama robot yeniden başlatılana dek kapalı kalır.
+`PROBOT_HAS_DASH_PERSIST` bu davranışın varlığını derleme anında bildirir.
 
 ### Config-free başlık ve sürüm makroları
 
@@ -591,6 +624,7 @@ zamanı · **E4xx** protokol/HTTP (E409, HTTP 409'un karşılığıdır).
 | PB-E305 | Çalışma | E-stop'ta `stop()` hook'u `PROBOT_ESTOP_END_MS` içinde dönmedi → çip reboot |
 | PB-E306 | Çalışma | Batarya sensörüne (INA219/INA226) I2C'de ulaşılamıyor — arayüz "Veri yok"a düşer, bağlantı/adres kontrol edin |
 | PB-E307 | Çalışma | Açılışta `PROBOT_CONSOLE_BYTES` için bellek yok: konsol mesajda yazan boyutta bir tamponla çalışır (açılıştan önce yazılan satırlar için alınmış 4096 bayt ya da 2048); 0 ise konsol satırları düşer. Değeri küçültün |
+| PB-E308 | Çalışma | Dashboard `PERSISTENT` değeri flash'ta (NVS) saklanamadı: yazılamadı (alan dolu, flash hatası ya da değer 2048 bayttan büyük; DS yeni bir değer yazana dek yeniden denenmez), silinemedi, kayıt okunamadı (kayıt korunur, bir kez bildirilir; DS'ten yeni değer yazılınca üstüne yazılır) ya da kayıt için bellek ayrılamadı (saklama yeniden başlatılana dek kapalı). Kalıcı değerleri küçültün ya da `clearPersisted()` çağırın; bellek hatasında belleği azaltın (örneğin daha küçük `PROBOT_DASH_MAX_VALUE`) ve robotu yeniden başlatın |
 | PB-E409 | HTTP | Komut geçersiz evrede (409) — `mode`/`init`/`start`/`stop` evre kuralları; `/files` ve `/files/get` robot boşta değilken ya da acil durdurmadan sonra |
 
 ## Acil durdurma

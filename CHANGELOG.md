@@ -130,6 +130,16 @@ Biçim [Keep a Changelog](https://keepachangelog.com/), sürümler
   `PROBOT_HAS_FILES_SHARE` marks the feature. A low-priority task does
   the file system work, one transfer at a time. New endpoints `/files` and
   `/files/get`.
+- Dashboard `PERSISTENT` topics keep their value across reboots in NVS
+  (namespace `pb_dash`): `publish()` queues the stored value as a write,
+  so the first `drainWrites()` delivers it. Only Driver Station writes
+  the robot code accepted are stored (not refused with `rejectWrite()`
+  before the next write for the topic is drained or within about 2 s);
+  values the robot sets itself are never stored. Storing waits until no
+  write for the topic is waiting and the robot is not running an OpMode.
+  Values up to 2048 bytes. `rejectWrite()` on a restored value erases it;
+  `clearPersisted()` erases all. PB-E308 when a value cannot be stored,
+  erased or read. `PROBOT_HAS_DASH_PERSIST` marks the feature.
 
 ### Changed
 - Dashboard schemas have their own size limit, `PROBOT_DASH_MAX_SCHEMA_BYTES`
