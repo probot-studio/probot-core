@@ -27,6 +27,7 @@
 static_assert(PROBOT_DASH_PERIOD_MS >= 10 && PROBOT_DASH_PERIOD_MS <= 250,
               "[PB-E108] PROBOT_DASH_PERIOD_MS must be 10-250. Docs: probotstudio.com/docs/hatalar/#pb-e108");
 #include "ws_joystick.hpp"
+#include "ds_files.hpp"
 
 #ifndef PROBOT_WIFI_AP_PASSWORD
 #error "[PB-E101] Driver station AP password not provided. Define PROBOT_WIFI_AP_PASSWORD (>=8 chars) before including probot.h. Docs: probotstudio.com/docs/hatalar/#pb-e101"
@@ -265,6 +266,8 @@ namespace probot::driverstation::esp32 {
       registerUri("/health",           HTTP_GET,  handleHealth);
       registerUri("/info",             HTTP_GET,  handleInfo);
       registerUri("/opmodes",          HTTP_GET,  handleOpModes);
+      registerUri("/files",            HTTP_GET,  handleFiles);
+      registerUri("/files/get",        HTTP_GET,  handleFileGet);
 
 #if PROBOT_CAPTIVE_PORTAL
       // Captive portal: spoofed OS connectivity probes + catch-all DNS
@@ -1023,6 +1026,19 @@ namespace probot::driverstation::esp32 {
         off += n;
       }
       return httpd_resp_send_chunk(req, nullptr, 0);
+    }
+
+    static esp_err_t handleFiles(httpd_req_t* req) {
+      auto* ds = self(req);
+      if (files_http::replyIfNoShares(req)) return ESP_OK;
+      if (!ds->enforceOwner(req)) return ESP_OK;
+      return files_http::list(req, ds->_rs);
+    }
+
+    static esp_err_t handleFileGet(httpd_req_t* req) {
+      auto* ds = self(req);
+      if (!ds->enforceOwner(req)) return ESP_OK;
+      return files_http::download(req, ds->_rs);
     }
 
     static esp_err_t handleGetBattery(httpd_req_t* req) {

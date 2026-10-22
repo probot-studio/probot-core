@@ -60,6 +60,7 @@ includes the modules). Namespace `probot`.
 | `src/probot/telemetry/telemetry.hpp` | Fixed-size telemetry buffer (`probot::printf` / `println`) |
 | `src/probot/devices/leds/builtin.hpp` | Status-only NeoPixel and optional RSL pin |
 | `src/driverstation/esp32s3/driver_station_esp32.hpp`, `ws_joystick.hpp` | WiFi AP, httpd, HTTP/WS protocol, captive portal, channel selection |
+| `src/probot/files/files.hpp`, `src/driverstation/esp32s3/ds_files.hpp` | `probot::files::share()` registry and its `/files` HTTP side (listing and download in a worker task through async requests) |
 | `ui/index.html` | The Driver Station web UI (one HTML file with inline CSS and JS); edit this |
 | `src/driverstation/esp32s3/index_html_gz.h` | Generated from `ui/index.html` by `tools/gen_ui.py`: the page gzip-compressed as a PROGMEM byte array, served with `Content-Encoding: gzip` |
 | `tests/` | Host unit tests (custom harness) with Arduino/FreeRTOS stubs in `tests/stubs/` |
