@@ -17,6 +17,12 @@ Biçim [Keep a Changelog](https://keepachangelog.com/), sürümler
   makes nearly every pass an overrun). The examples no longer use them.
 - `USER_LOOP_PERIOD_MS` must be 1-1000; `0` (run as fast as possible) and
   larger values used to compile and now fail with PB-E109.
+- Joystick: `getPOV()` reports the diagonals 45/135/225/315 for gamepads
+  with D-pad buttons and opposite directions cancel out (it used to report
+  the first pressed of up, right, down, left). `getDpadUp/Right/Down/Left()`
+  also hold on their diagonals, so up+right reads both. Trigger axes are
+  analog 0..1 from browser gamepads instead of 0 or 1, with the stick
+  deadzone applied.
 
 ### Added
 - `probot::framework::install()`: a framework layer runs `boot`,
@@ -70,12 +76,30 @@ Biçim [Keep a Changelog](https://keepachangelog.com/), sürümler
   `/health` and the `'S'` frame gain `loopMs` and `overruns`; the Driver
   Station shows them on the Logs page. `USER_LOOP_PERIOD_MS` outside 1-1000
   fails the build with PB-E109.
+- Up to six gamepads: the Driver Station sends the selected source on
+  port 0 and every other connected browser gamepad on the lowest free
+  port 1-5, which it keeps until it is unplugged (ports never shift, and a
+  lost port 0 gamepad is not replaced by another one). While keyboard or
+  touch is the port 0 source, the selected gamepad also takes a port 1-5.
+  `joystick_api::makeForPort(port)`, `io::gamepad(port)`,
+  `io::rawGamepad(port)` and `ds::rawGamepad(port, out)` read them.
+  Joystick `getRawButtonValue(i)` (analog 0..1), `getName(buf, cap)` and
+  `isStandardMapping()`. Protocol: `'J'` byte 3 is the port and an
+  optional analog value trailer follows the buttons; new `'N'` frame
+  carries the gamepad name and mapping. Pages that send 0 there keep
+  working; bytes after the buttons that are not a valid value trailer now
+  drop the frame. Client frames other than `'W'` may now be 68 bytes (was
+  47). `ds::packetSeq()` counts every port's frames.
 
 ### Changed
 - `probot::emergencyStop()` moved to `robot/state.hpp` and
   `probot::io::gamepad()` to `io/gamepad.hpp` so both are config-free.
   `PROBOT_INPUT_TIMEOUT_MS` is now applied in `runtime_setup()`, so it
   stays the sketch's value when other `.cpp` files include the API.
+- `joyAgeMs` in `/health` and `'S'` is the age of the last Driver Station
+  frame; it used to read about 0 while the robot was disabled.
+  `GamepadService::lastWriteMs()` is now `lastFrameMs()` with the same
+  meaning (the old name remains as an alias).
 
 ## [0.4.0] — Probot Studio Uyumu — 2026-07-17
 

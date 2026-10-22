@@ -352,7 +352,7 @@ Rules:
   teleopInit/Loop/Stop triples; two loops and two stops are required.
 - Joystick: auto js = probot::io::joystick_api::makeDefault();
   js.getLeftY() etc. (-1..+1). Methods such as getLeftX do NOT exist on
-  probot::io::gamepad().
+  probot::io::gamepad(). A second gamepad: makeForPort(1) (ports 0-5).
 - For servos use raw LEDC: ledcAttachChannel(pin,50,14,7) in the relevant
   init (high channel, so it does not collide with motor analogWrite), and
   ledcWrite in teleopLoop.

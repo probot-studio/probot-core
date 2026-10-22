@@ -152,7 +152,7 @@ namespace probot {
     }
 
     inline void zeroInputs(){
-      probot::io::gamepad().write(millis(), nullptr, 0, nullptr, 0);
+      probot::io::detail::neutralizeAll(millis(), false);
     }
 
     inline uint32_t userClockNow(){ return millis(); }
@@ -377,8 +377,7 @@ namespace probot {
     // gamepad.hpp is config-free and may be included by several TUs, so the
     // sketch's PROBOT_INPUT_TIMEOUT_MS is applied here, not by whichever
     // TU happens to construct the services.
-    probot::io::gamepad().setTimeoutMs(PROBOT_INPUT_TIMEOUT_MS);
-    probot::io::rawGamepad().setTimeoutMs(PROBOT_INPUT_TIMEOUT_MS);
+    probot::io::detail::setTimeoutMs(PROBOT_INPUT_TIMEOUT_MS);
     __atomic_store_n(&core::g_loop_period_default_ms, (uint32_t)USER_LOOP_PERIOD_MS, __ATOMIC_SEQ_CST);
     __atomic_store_n(&probot::robot::g_utility_hooks,
                      detail::orEmpty(&::utilityLoop) != &detail::emptyHook ? 1u : 0u, __ATOMIC_SEQ_CST);

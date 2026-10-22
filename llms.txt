@@ -29,7 +29,8 @@ Rules that generated code MUST follow:
 - Joystick access: `auto js = probot::io::joystick_api::makeDefault();`
   then `js.getLeftY()`, `js.getA()`, `js.getPOV()` etc. Axis range is
   -1..+1, Y is positive up. `probot::io::gamepad()` is the low-level
-  service and has NO getLeftX/getA-style methods.
+  service and has NO getLeftX/getA-style methods. A second driver's
+  gamepad: `probot::io::joystick_api::makeForPort(1)` (ports 0-5).
 - Servos: the library provides NO servo class — drive raw LEDC. In
   the relevant OpMode init call `ledcAttachChannel(pin, 50, 14, 7)` (a HIGH channel, so it
   never shares a timer with `analogWrite` motor PWM → no jitter); in the loop
