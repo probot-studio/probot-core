@@ -184,6 +184,7 @@ namespace probot {
       auto& rs = probot::robot::state();
       primeLoopHeartbeat();
       if (fw.boot) fw.boot();
+      vTaskDelay(1);   // the first pass starts on a tick boundary, like every later one
       core::LoopPacer pacer;
       pacer.start(xTaskGetTickCount());
       for(;;){
@@ -194,10 +195,11 @@ namespace probot {
                         &probot::robot::g_loop_heartbeat_ms, &userClockNow);
 
         TickType_t period = pdMS_TO_TICKS(probot::loopPeriodMs());
-        bool overrun = false;
+        bool overrun = false, restarted = false;
         TickType_t sleep = pacer.afterCycle(xTaskGetTickCount(), period ? period : 1,
-                                            g_machine.current() != before, &overrun);
+                                            g_machine.current() != before, &overrun, &restarted);
         if (overrun) __atomic_add_fetch(&core::g_loop_overruns, 1u, __ATOMIC_SEQ_CST);
+        if (restarted) __atomic_add_fetch(&core::g_loop_grid_restarts, 1u, __ATOMIC_SEQ_CST);
         // The sleep is not user code: stamp the heartbeat past it so a long
         // period never reads as a stall.
         __atomic_store_n(&probot::robot::g_loop_heartbeat_ms,

@@ -37,6 +37,7 @@ utilityAvailable	KEYWORD2
 setLoopPeriodMs	KEYWORD2
 loopPeriodMs	KEYWORD2
 loopOverruns	KEYWORD2
+loopGridRestarts	KEYWORD2
 makeDefault	KEYWORD2
 getLeftX	KEYWORD2
 getLeftY	KEYWORD2

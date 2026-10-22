@@ -356,3 +356,12 @@ TEST_CASE(dashboard_schemas_have_their_own_size_limit_counted_in_the_pool){
                                desc.data(), desc.size()));
   dash::detail::resetForTest();
 }
+
+TEST_CASE(dashboard_limits_report_the_configured_values_after_clamping){
+  dash::detail::resetForTest();
+  EXPECT_TRUE(dash::limits().maxTopics == 0 && dash::limits().maxSchemaBytes == 0);
+  dash::detail::configure(dash::Limits{ 300, 4, 20000, 32768, 2048, 40000 });
+  dash::Limits l = dash::limits();
+  EXPECT_TRUE(l.maxTopics == 255 && l.maxSchemas == 4 && l.maxValue == 16384);
+  EXPECT_TRUE(l.poolBytes == 32768 && l.writeQueueBytes == 2048 && l.maxSchemaBytes == 32768);
+}

@@ -58,6 +58,11 @@ Biçim [Keep a Changelog](https://keepachangelog.com/), sürümler
   an `Alerts` list (`errors` / `warnings` / `infos`) and WPILib field order
   for `PIDController` folders; a tunable PID also shows `measurement` and
   `error` from its `/Telemetry` twin.
+- `probot::loopGridRestarts()`: counts every restart of the pass
+  schedule, including late `init`/`start`/`stop` passes that
+  `loopOverruns()` leaves out, so code that follows the pass grid can
+  re-align. The first pass after boot now starts on a tick boundary.
+- `dashboard::limits()` returns the store limits in effect.
 - Driver Station "Veri" page widgets for the WPILib 2027 layouts:
   `Scheduler` (running commands, with a cancel button that writes the
   command id to a tunable `Cancel`), `Field2d` (`struct:Pose2d[]` objects

@@ -74,3 +74,16 @@ TEST_CASE(loop_period_setter_validates_and_restores_the_default){
   EXPECT_TRUE(probot::loopPeriodMs() == 20);
   EXPECT_TRUE(probot::loopOverruns() == 0);
 }
+
+TEST_CASE(loop_pacer_reports_every_grid_restart_including_one_shot_passes){
+  LoopPacer p;
+  p.start(0);
+  bool overrun = true, restarted = true;
+  EXPECT_TRUE(p.afterCycle(5, 20, false, &overrun, &restarted) == 15 && !overrun && !restarted);
+  // A late init/start/stop pass is no overrun, but the grid moves (to 301).
+  EXPECT_TRUE(p.afterCycle(300, 20, true, &overrun, &restarted) == 1 && !overrun && restarted);
+  EXPECT_TRUE(p.afterCycle(305, 20, false, &overrun, &restarted) == 16 && !overrun && !restarted);
+  EXPECT_TRUE(p.afterCycle(400, 20, false, &overrun, &restarted) == 1 && overrun && restarted);
+  // A one-shot pass that ends in time keeps the grid.
+  EXPECT_TRUE(p.afterCycle(410, 20, true, &overrun, &restarted) == 11 && !overrun && !restarted);
+}

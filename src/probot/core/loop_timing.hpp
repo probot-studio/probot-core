@@ -12,6 +12,7 @@ namespace probot {
     inline volatile uint32_t g_loop_period_ms = 0;           // 0 = default
     inline volatile uint32_t g_loop_period_default_ms = 20;  // set by runtime_setup()
     inline volatile uint32_t g_loop_overruns = 0;
+    inline volatile uint32_t g_loop_grid_restarts = 0;
 
     // Fixed-rate schedule in ticks (vTaskDelayUntil semantics). Pure logic
     // so host tests can drive it; the user task applies the result.
@@ -24,11 +25,14 @@ namespace probot {
       // its deadline is an overrun; the schedule then restarts after the
       // sleep instead of running the missed periods back to back. A cycle
       // that ran a one-shot init/start/stop hook (`oneShot`) is late by
-      // design and not counted.
-      uint32_t afterCycle(uint32_t now, uint32_t period, bool oneShot, bool* overrun) {
+      // design and not counted as an overrun, but its restart is reported
+      // in `restarted` like every other one.
+      uint32_t afterCycle(uint32_t now, uint32_t period, bool oneShot, bool* overrun,
+                          bool* restarted = nullptr) {
         uint32_t next = _last + period;
         int32_t left = (int32_t)(next - now);
         *overrun = left < 0 && !oneShot;
+        if (restarted) *restarted = left < 0;
         if (left >= 0) { _last = next; return left ? (uint32_t)left : 1u; }
         _last = now + 1;
         return 1;
@@ -63,6 +67,13 @@ namespace probot {
   // User task cycles since boot that ended after their deadline.
   inline uint32_t loopOverruns() {
     return __atomic_load_n(&core::g_loop_overruns, __ATOMIC_SEQ_CST);
+  }
+
+  // Times the pass schedule restarted since boot: every late cycle,
+  // including the init/start/stop passes loopOverruns() leaves out. A
+  // change here means later passes start on a new grid.
+  inline uint32_t loopGridRestarts() {
+    return __atomic_load_n(&core::g_loop_grid_restarts, __ATOMIC_SEQ_CST);
   }
 
 } // namespace probot
