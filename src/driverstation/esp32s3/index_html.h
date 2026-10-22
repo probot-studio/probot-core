@@ -98,6 +98,9 @@ const char MAIN_page[] PROGMEM = R"=====(
       cursor:pointer;position:relative;padding:3px 2px;transition:color .12s;
     }
     .nav-link:hover{color:var(--orange-700);}
+    .nav-badge{display:inline-block;min-width:1.5em;margin-left:4px;padding:1px 5px;border-radius:999px;
+      background:var(--stop);color:#fff;font-size:0.66rem;line-height:1.3;text-align:center;}
+    .nav-badge.w{background:var(--amber);}
     .nav-link.active{color:var(--orange-700);}
     .nav-link.active::after{
       content:"";position:absolute;left:0;right:0;bottom:-2px;height:2px;
@@ -698,7 +701,7 @@ const char MAIN_page[] PROGMEM = R"=====(
         <a class="nav-link active" data-page="dashboard" onclick="showPage('dashboard')">Dashboard</a>
         <a class="nav-link" data-page="data" onclick="showPage('data')">Veri</a>
         <a class="nav-link" data-page="joystick" onclick="showPage('joystick')">Joystick</a>
-        <a class="nav-link" data-page="logs" onclick="showPage('logs')">Logs</a>
+        <a class="nav-link" data-page="logs" onclick="showPage('logs')">Logs<span class="nav-badge" id="logsBadge" hidden></span></a>
       </nav>
       <div class="conn-bar">
         <div class="conn-dot bad" id="connDot"></div>
@@ -928,6 +931,15 @@ const char MAIN_page[] PROGMEM = R"=====(
       <!-- ================= LOGS ================= -->
       <section class="page" id="page-logs">
         <div class="jgrid">
+          <div class="widget" style="grid-column:1/-1;">
+            <div class="tele-head">
+              <div class="w-head">Robot Console</div>
+              <div class="tele-actions">
+                <button class="mini-btn" onclick="clearConsole()">Clear</button>
+              </div>
+            </div>
+            <div class="console tele-log" id="robotConsole" aria-live="polite"></div>
+          </div>
           <div class="widget lg-wifi">
             <div class="w-head">WiFi Configuration</div>
             <div class="kv-grid">
@@ -1101,7 +1113,7 @@ const char MAIN_page[] PROGMEM = R"=====(
     document.querySelectorAll('.nav-link').forEach(function(a){a.classList.remove('active');});
     var pg=$id('page-'+name); if(pg) pg.classList.add('active');
     var nv=document.querySelector('.nav-link[data-page="'+name+'"]'); if(nv) nv.classList.add('active');
-    if(name==='logs') setTimeout(drawCharts,60);
+    if(name==='logs'){setTimeout(drawCharts,60);conUnread(0);}
     window.scrollTo({top:0,behavior:'smooth'});
   }
 
@@ -1138,6 +1150,85 @@ const char MAIN_page[] PROGMEM = R"=====(
     el.scrollTop=el.scrollHeight;
   }
   function clearEventLog(){var el=$id('evLog');if(el)el.innerHTML='';evLineNo=0;}
+
+  /* =========================================================================
+     ROBOT CONSOLE ('L' frames): robot console lines with a level
+     (0 info, 1 warning, 2 error) and robot uptime. Lines are deduplicated
+     by sequence; a gap the robot still holds asks for a resync ('Q').
+     ========================================================================= */
+  var conBoot=0,conSeq=0,conNo=0,conBad=0,conWorst=0,conGap=false,conRetry=0;
+  function conRow(lv,time,msg,cls){
+    var el=$id('robotConsole'); if(!el) return;
+    var stick=el.scrollTop+el.clientHeight>=el.scrollHeight-8;
+    var ln=document.createElement('span');ln.className='ln'+(cls?' '+cls:'');
+    if(lv){
+      conNo++;
+      var no=document.createElement('span');no.className='no';no.textContent=String(conNo).padStart(4,'0');
+      var l=document.createElement('span');l.className='lv '+lv;l.textContent=lv.toUpperCase();
+      var t=document.createElement('span');t.className='t';t.textContent=time;
+      ln.appendChild(no);ln.appendChild(l);ln.appendChild(t);
+    }
+    var m=document.createElement('span');m.className='msg';m.textContent=msg;ln.appendChild(m);
+    el.appendChild(ln);
+    while(el.childElementCount>500) el.removeChild(el.firstChild);
+    if(stick) el.scrollTop=el.scrollHeight;
+  }
+  function conUptime(ms){
+    var s=Math.floor(ms/1000);
+    return Math.floor(s/60)+':'+pad2(s%60)+'.'+Math.floor(ms/100)%10;
+  }
+  /* The last line seen on the Logs page, per robot boot. Kept across a
+     refresh so the 'Q' replay does not count already-read warnings again. */
+  var conReadBoot=0,conReadSeq=0;
+  try{var cr=(localStorage.getItem('probotConRead')||'').split(':');conReadBoot=+cr[0]||0;conReadSeq=+cr[1]||0;}catch(e){}
+  function conMarkRead(){
+    if(!conBoot) return;
+    conReadBoot=conBoot;conReadSeq=conSeq;
+    try{localStorage.setItem('probotConRead',conBoot+':'+conSeq);}catch(e){}
+  }
+  function conUnread(level){
+    var b=$id('logsBadge'); if(!b) return;
+    if(!level){conMarkRead();conBad=0;conWorst=0;b.hidden=true;return;}
+    if($id('page-logs').classList.contains('active')){conMarkRead();return;}
+    if(conBoot===conReadBoot&&conSeq<=conReadSeq) return;
+    conBad++;conWorst=Math.max(conWorst,level);
+    b.hidden=false;b.textContent=conBad>99?'99+':String(conBad);
+    b.className='nav-badge'+(conWorst<2?' w':'');
+    b.title=conBad+' yeni uyarı/hata (Robot Console)';
+  }
+  function conFrame(v){
+    if(v.length<9) return;
+    var dv=new DataView(v.buffer,v.byteOffset,v.byteLength);
+    var boot=dv.getUint32(1,true),first=dv.getUint32(5,true);
+    if(boot!==conBoot){
+      if(conBoot) conRow('','','Robot yeniden başladı','hint-line');
+      conBoot=boot;conSeq=0;
+    }
+    for(var i=9;i+11<=v.length;){
+      var seq=dv.getUint32(i,true),ms=dv.getUint32(i+4,true),lv=v[i+8],len=dv.getUint16(i+9,true);
+      if(i+11+len>v.length) return;
+      /* A fresh page starts at the oldest line; newer ones that beat the
+         resync reply would make it skip the backlog. */
+      if(!conSeq&&seq>first){conResync();return;}
+      if(seq>conSeq){
+        if(conSeq&&seq>conSeq+1){
+          if(conSeq+1>=first){conResync();return;} /* still on the robot: fetch again */
+          conRow('','',(seq-conSeq-1)+' satır kaçırıldı (robot konsolu doldu)','hint-line');
+        }
+        conRow(lv>=2?'e':lv===1?'w':'i',conUptime(ms),textDecoder.decode(v.subarray(i+11,i+11+len)),lv>=2?'e-row':'');
+        conSeq=seq;conGap=false;
+        if(lv>=1) conUnread(lv);
+      }
+      i+=11+len;
+    }
+  }
+  /* dkAskResync() drops a request within 1 s of the previous one, and console
+     lines can be rare: ask again later unless the gap has closed by then. */
+  function conResync(){
+    conGap=true;dkAskResync();
+    if(!conRetry) conRetry=setTimeout(function(){conRetry=0;if(conGap)conResync();},1100);
+  }
+  function clearConsole(){var el=$id('robotConsole');if(el)el.innerHTML='';conNo=0;conUnread(0);}
 
   /* =========================================================================
      ROBOT STATE — 'S' WS frame'leri (>=1Hz) ana kaynak; WS düşükken HTTP
@@ -1858,6 +1949,8 @@ const char MAIN_page[] PROGMEM = R"=====(
       lastDataMs=performance.now();
       if(!telemCleared) renderTelemetry(textDecoder.decode(v.subarray(1)));
       else telemCleared=false; /* clear sonrası ilk frame'i atla, sonra akış sürer */
+    }else if(v[0]===0x4C){ /* 'L' robot console */
+      conFrame(v);
     }else{
       dkFrame(v); /* dashboard frames; unknown types are ignored */
     }

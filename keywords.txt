@@ -91,6 +91,7 @@ print	KEYWORD2
 println	KEYWORD2
 printf	KEYWORD2
 clearTelemetry	KEYWORD2
+console	KEYWORD1
 setActiveByName	KEYWORD2
 setColor	KEYWORD2
 setBrightness	KEYWORD2

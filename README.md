@@ -134,6 +134,7 @@ All of them are defined **before** the `#include <probot.h>` line.
 | `USER_LOOP_PERIOD_MS` | `20` | Fixed-rate call period of InitLoop/loop (~50 Hz), 1-1000; change at runtime with `probot::setLoopPeriodMs()` |
 | `PROBOT_USER_STACK` | `8192` | User task stack in bytes (at least 4096) [PB-E107] |
 | `PROBOT_DASH_MAX_TOPICS` / `_MAX_VALUE` / `_POOL_BYTES` | `128` / `1024` / `32768` | Dashboard topic store limits (advanced, see API.md) [PB-E108] |
+| `PROBOT_CONSOLE_BYTES` | `4096` | Robot console buffer in bytes (2048-65536); the oldest lines drop when it is full [PB-E110] |
 | `NEOPIXEL_BRIGHTNESS` | `32` | Status LED brightness (0-255) |
 
 ## Competition day: channel plan
@@ -358,6 +359,8 @@ Rules:
   ledcWrite in teleopLoop.
 - teleopLoop is called at ~50 Hz; do not write infinite loops, long
   blocking calls or delay() in it.
+- Warnings/errors that must stay visible: probot::console::warning(...) /
+  error(...) (DS Logs page); probot::printf is the per-loop panel.
 ```
 
 Machine-readable summary: [`llms.txt`](llms.txt) · Full reference: [`API.md`](API.md)

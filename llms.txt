@@ -41,6 +41,10 @@ Rules that generated code MUST follow:
   block longer than 2 s inside them, and do not call `delay()` in them
   (the library already waits between passes).
 - Telemetry to the driver station panel: `probot::printf("v=%.2f\n", v);`
+  (a screen the sketch may clear each loop). Messages that must stay
+  (warnings, errors, events) go to the console:
+  `probot::console::warning("battery %.1f V", v);` (`info`, `error` too),
+  shown on the Logs page. Do not write to the console every loop.
 - Extra .cpp files include `<probot/api.hpp>` (config-free), never
   `<probot.h>`, which belongs to the sketch only.
 - Inputs auto-zero 500 ms after the link drops — driving motors directly

@@ -70,3 +70,4 @@ inline bool __wifiStubSendFail(const uint8_t*, size_t){
 }
 
 inline uint32_t micros(){ return millis() * 1000u; }
+inline uint32_t esp_random(){ static uint32_t x = 0x9E3779B9u; x ^= x << 13; x ^= x >> 17; x ^= x << 5; return x; }

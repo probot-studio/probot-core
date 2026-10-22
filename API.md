@@ -174,6 +174,36 @@ probot::printf("hiz=%.2f\n", hiz);
 probot::clearTelemetry();
 ```
 
+`printf` bir çağrıda panelin tamamını (256 bayt) yazabilir.
+
+### Konsol
+
+Panel her turda silinip yeniden yazılan bir ekrandır. Kalıcı mesajlar
+(uyarı, hata, olay) konsola yazılır: DS'te **Logs** sayfasındaki **Robot
+Console** kartında seviye ve robot çalışma süresiyle görünür. Satırlar
+silinmez; tampon dolunca en eskileri düşer. Uyarı ve hata gelince menüdeki
+**Logs** sekmesinde okunmamış sayısı belirir.
+
+```cpp
+probot::console::info("Otonom: %s", "Sol");
+probot::console::warning("Batarya düşük: %.1f V", v);
+probot::console::error("Kol motoru takıldı");
+probot::console::write(probot::console::Level::Error, metin, uzunluk);   // biçimsiz
+```
+
+| Çağrı | Açıklama |
+|---|---|
+| `console::info/warning/error(fmt, ...)` | `printf` biçimiyle bir satır; en çok 512 bayt (fazlası kesilir; iki görev aynı anda 159 bayttan uzun satır yazarsa biri 159 baytta kesilir) |
+| `console::write(level, text, len)` | Biçimsiz metin, uzunluk sınırı yok: 512 bayttan uzunsa (mümkünse satır sonundan, hiçbir zaman bir UTF-8 karakterin ortasından değil) birkaç satıra bölünür |
+| `console::print(level, text)` | `write` ile aynı, NUL ile biten metin için |
+
+Sondaki `\n` atılır. Tampon boyutu `PROBOT_CONSOLE_BYTES` (varsayılan 4096,
+2048-65536, PB-E110); yığından (heap) alınır: açılış bitmeden yazılan
+ilk satırda 4096 bayt, sonra açılışta bir kez `PROBOT_CONSOLE_BYTES`
+boyutuna taşınır. Bellek yetmezse Serial'e PB-E307 yazılır. Konsol config-free'dir
+(`<probot/api.hpp>`), her görevden çağrılabilir (kesme/ISR içinden değil);
+loop içinde her turda yazmayın, tampon hızla dolar.
+
 ## Servo (kütüphane sınıf SAĞLAMAZ — kalıp)
 
 probot çıkış donanımını sarmalamaz; servoyu **ham LEDC** ile sen sürersin.
@@ -451,6 +481,7 @@ Yaşam döngüsü / güvenlik makroları:
 | `PROBOT_DASH_WRITE_QUEUE` | 2048 | Bekleyen DS yazmaları için bayt |
 | `PROBOT_DASH_PERIOD_MS` | 50 | Dashboard gönderim periyodu (10-250) |
 | `PROBOT_DASH_MAX_BYTES_PER_TICK` | 8192 | Periyot başına en çok dashboard baytı |
+| `PROBOT_CONSOLE_BYTES` | 4096 | Robot konsolu tamponu, bayt (2048-65536, PB-E110) |
 
 ## Hata kodları (PB-Exx)
 
@@ -470,6 +501,7 @@ zamanı · **E4xx** protokol/HTTP (E409, HTTP 409'un karşılığıdır).
 | PB-E107 | Derleme | `PROBOT_USER_STACK` 4096 bayttan küçük |
 | PB-E108 | Derleme | Dashboard sınırı geçersiz: `PROBOT_DASH_MAX_TOPICS` 1-255, `PROBOT_DASH_MAX_SCHEMAS` 0-255, `PROBOT_DASH_MAX_VALUE` 16-16384, `PROBOT_DASH_PERIOD_MS` 10-250 dışında |
 | PB-E109 | Derleme | `USER_LOOP_PERIOD_MS` 1-1000 ms dışında |
+| PB-E110 | Derleme | `PROBOT_CONSOLE_BYTES` 2048-65536 dışında |
 | PB-E201 | Bağlama | Zorunlu hook tanımsız — `undefined reference to teleopLoop()` vb. Dördü de (boş olsa bile) tanımlanmalı |
 | PB-E202 | Bağlama | `setup()`/`loop()` sketch'te tanımlanmış — kütüphaneye aittir, hook'ları kullanın |
 | PB-E301 | Çalışma | Deadline miss / stall: bir `initLoop`/`loop` turu `PROBOT_LOOP_DEADLINE_MS`'i (ya da tek seferlik `init`/`start`/`stop` hook'u `PROBOT_HOOK_DEADLINE_MS`'i) aştı; girişler sıfır, halt-safe |
@@ -478,6 +510,7 @@ zamanı · **E4xx** protokol/HTTP (E409, HTTP 409'un karşılığıdır).
 | PB-E304 | Çalışma | DS bağlantısı koptu → joystick nötr, yeniden bağlanma bekleniyor (`FORCE_STOP=0`) |
 | PB-E305 | Çalışma | E-stop'ta `stop()` hook'u `PROBOT_ESTOP_END_MS` içinde dönmedi → çip reboot |
 | PB-E306 | Çalışma | Batarya sensörüne (INA219/INA226) I2C'de ulaşılamıyor — arayüz "Veri yok"a düşer, bağlantı/adres kontrol edin |
+| PB-E307 | Çalışma | Açılışta `PROBOT_CONSOLE_BYTES` için bellek yok: konsol mesajda yazan boyutta bir tamponla çalışır (açılıştan önce yazılan satırlar için alınmış 4096 bayt ya da 2048); 0 ise konsol satırları düşer. Değeri küçültün |
 | PB-E409 | HTTP | Komut geçersiz evrede (409) — `mode`/`init`/`start`/`stop` evre kuralları |
 
 ## Acil durdurma
@@ -563,9 +596,10 @@ Sahip düştüğünde gamepad verisi anında sıfırlanır.
 'W' 0x57  dashboard yazma: [1..2] u16 topic id (LE), [3] u8 değer tipi,
           [4..] değer baytları (en çok PROBOT_DASH_MAX_VALUE). Yalnız
           kuyruğa girer; robot kodu drainWrites() ile uygular
-'Q' 0x51  dashboard yeniden eşitleme (tek bayt): tüm şema, duyuru ve
-          değerler yeniden gönderilir. Sayfa her bağlantıda ve bilmediği
-          bir id gördüğünde yollar
+'Q' 0x51  yeniden eşitleme (tek bayt): tüm dashboard şema, duyuru ve
+          değerleri ile robotta duran tüm konsol satırları yeniden
+          gönderilir. Sayfa her bağlantıda, bilmediği bir dashboard id'si
+          ya da konsolda boşluk gördüğünde yollar
 ```
 
 `'J'`/`'N'`/`'P'` en çok 68 bayttır; yalnız `'W'` bundan uzun olabilir: en
@@ -587,6 +621,11 @@ Robot → istemci (push):
           `dash*` sayaçları dışındaki alanları ve `dashMax` (bir dashboard
           değerinin en çok bayt sayısı; yalnız burada).
 'T' 0x54  telemetri tamponu (text) — içerik değiştiğinde
+'L' 0x4C  konsol satırları, her PROBOT_DASH_PERIOD_MS turunda en çok 4 çerçeve: [1..4] u32
+          boot kimliği (her açılışta rastgele), [5..8] u32 robotta duran
+          en eski satırın sırası, sonra tekrarlı { u32 sıra, u32 robot ms,
+          u8 seviye (0 bilgi, 1 uyarı, 2 hata), u16 uzunluk, UTF-8 metin };
+          hepsi little-endian. Aynı sırayı ikinci kez alan istemci atlar
 'C' 0x43  şema: u8 ad uzunluğu, ad, u8 tip uzunluğu, tip, u16 uzunluk,
           baytlar (ör. "struct:Pose2d", "structschema")
 'A' 0x41  topic duyurusu, tekrarlı: u16 id, u8 değer tipi, u8 bayraklar,

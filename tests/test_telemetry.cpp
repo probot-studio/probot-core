@@ -77,3 +77,10 @@ TEST_CASE(telemetry_seq_increments){
   probot::telemetry::print("x");
   EXPECT_TRUE(probot::telemetry::getSeq() > s0);
 }
+
+TEST_CASE(telemetry_printf_is_not_cut_at_127_chars){
+  resetTelemetry();
+  std::string line(200, 'k');
+  probot::printf("%s!", line.c_str());
+  EXPECT_TRUE(std::string(probot::telemetry::getBuffer()) == line + "!");
+}
