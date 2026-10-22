@@ -161,15 +161,16 @@ elle renk atama API'si yoktur (LED'in rengi hep bir anlam taşır).
 |---|---|
 | Mavi sabit | STOPPED, DS bağlı değil (INIT/RUN'da DS olmasa da faz rengi gösterilir) |
 | Mavi yanıp sönüyor | DS bağlı + STOPPED |
-| Sarı sabit | INIT (Auto veya TeleOp), Start bekleniyor |
+| Sarı sabit | INIT (Auto, TeleOp veya Utility), Start bekleniyor |
 | Sarı yanıp sönüyor | TRANSITION: Auto bitti, TeleOp önseçili; Init bekleniyor |
 | Turuncu yanıp sönüyor | AUTO_RUN |
 | Yeşil yanıp sönüyor | TELEOP_RUN |
+| Mor yanıp sönüyor | UTILITY_RUN (kurulum ve bakım modu, bkz. API.md) |
 | Kırmızı yanıp sönüyor | Stalled — loop 2 sn'den uzun döndü, güvende tutuluyor |
 | Kırmızı sabit | Acil durdurma (kilitli, reboot gerekli) |
 
 **RSL (sinyal lambası):** `#define PROBOT_RSL_PIN <gpio>` verirseniz kütüphane
-o digital pini yalnız AUTO_RUN/TELEOP_RUN'da yanıp söndürür; INIT, STOPPED,
+o digital pini yalnız AUTO_RUN/TELEOP_RUN/UTILITY_RUN'da yanıp söndürür; INIT, STOPPED,
 TRANSITION ve E-stop'ta **sabit açık** tutar.
 
 ## Batarya ölçümü

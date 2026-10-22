@@ -53,3 +53,11 @@ TEST_CASE(active_phase_and_mode_classification){
   EXPECT_TRUE(core::modeOfPhase(robot::Phase::TELEOP_INIT) == robot::OpMode::TELEOP);
   EXPECT_TRUE(core::modeOfPhase(robot::Phase::TELEOP_RUN) == robot::OpMode::TELEOP);
 }
+
+TEST_CASE(status_led_and_rsl_cover_utility){
+  EXPECT_TRUE(core::statusColor(snap(robot::Phase::UTILITY_INIT, 1), false, false) == YELLOW);
+  EXPECT_TRUE(core::statusColor(snap(robot::Phase::UTILITY_RUN, 1), false, true) == (core::Rgb{160, 0, 255}));
+  EXPECT_TRUE(core::statusColor(snap(robot::Phase::UTILITY_RUN, 1), false, false) == OFF);
+  EXPECT_TRUE(core::rslBlinking(robot::Phase::UTILITY_RUN, false));
+  EXPECT_TRUE(!core::rslBlinking(robot::Phase::UTILITY_INIT, false));
+}

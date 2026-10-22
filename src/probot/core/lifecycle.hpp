@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include <probot/robot/opmodes.hpp>
 #include <probot/robot/state.hpp>
 
 // A single initLoop/loop iteration that has not returned within this many ms
@@ -43,8 +44,9 @@ namespace probot::core {
   }
   inline bool operator!=(DesiredState a, DesiredState b) { return !(a == b); }
 
-  // Optional hooks may be null; the four loop/stop hooks are required by the
-  // public API and runtime always supplies them.
+  // Optional hooks may be null; the four AUTO/TELEOP loop/stop hooks are
+  // required by the public API and runtime always supplies them. The UTILITY
+  // hooks are all optional.
   struct Hooks {
     void (*autonomousInit)();
     void (*autonomousInitLoop)();
@@ -56,6 +58,11 @@ namespace probot::core {
     void (*teleopStart)();
     void (*teleopLoop)();
     void (*teleopStop)();
+    void (*utilityInit)();
+    void (*utilityInitLoop)();
+    void (*utilityStart)();
+    void (*utilityLoop)();
+    void (*utilityStop)();
   };
 
   inline robot::Phase phaseFor(OpMode mode, Stage stage) {
@@ -64,14 +71,19 @@ namespace probot::core {
     if (mode == OpMode::AUTO) {
       return stage == Stage::INIT ? robot::Phase::AUTO_INIT : robot::Phase::AUTO_RUN;
     }
+    if (mode == OpMode::UTILITY) {
+      return stage == Stage::INIT ? robot::Phase::UTILITY_INIT : robot::Phase::UTILITY_RUN;
+    }
     return stage == Stage::INIT ? robot::Phase::TELEOP_INIT : robot::Phase::TELEOP_RUN;
   }
 
   inline bool isInitPhase(robot::Phase phase) {
-    return phase == robot::Phase::AUTO_INIT || phase == robot::Phase::TELEOP_INIT;
+    return phase == robot::Phase::AUTO_INIT || phase == robot::Phase::TELEOP_INIT ||
+           phase == robot::Phase::UTILITY_INIT;
   }
   inline bool isRunPhase(robot::Phase phase) {
-    return phase == robot::Phase::AUTO_RUN || phase == robot::Phase::TELEOP_RUN;
+    return phase == robot::Phase::AUTO_RUN || phase == robot::Phase::TELEOP_RUN ||
+           phase == robot::Phase::UTILITY_RUN;
   }
   // INIT or RUN: an OpMode is active and owns a stop hook.
   inline bool isActivePhase(robot::Phase phase) {
@@ -79,8 +91,14 @@ namespace probot::core {
   }
   // OpMode a phase belongs to; TELEOP for phases without an active OpMode.
   inline OpMode modeOfPhase(robot::Phase phase) {
-    return (phase == robot::Phase::AUTO_INIT || phase == robot::Phase::AUTO_RUN)
-           ? OpMode::AUTO : OpMode::TELEOP;
+    if (phase == robot::Phase::AUTO_INIT || phase == robot::Phase::AUTO_RUN) return OpMode::AUTO;
+    if (phase == robot::Phase::UTILITY_INIT || phase == robot::Phase::UTILITY_RUN) return OpMode::UTILITY;
+    return OpMode::TELEOP;
+  }
+
+  // The hook of `mode` among its AUTO, TELEOP and UTILITY variants.
+  inline void (*pick(OpMode mode, void (*autoFn)(), void (*teleopFn)(), void (*utilityFn)()))() {
+    return mode == OpMode::AUTO ? autoFn : mode == OpMode::UTILITY ? utilityFn : teleopFn;
   }
   inline bool canSelectMode(robot::Phase phase) {
     return phase == robot::Phase::STOPPED || phase == robot::Phase::TRANSITION;
@@ -175,25 +193,21 @@ namespace probot::core {
       return clockNow ? clockNow() : now;
     }
 
+    static void call(void (*fn)()) { if (fn) fn(); }
     static void callInit(const Hooks& h, OpMode mode) {
-      auto fn = mode == OpMode::AUTO ? h.autonomousInit : h.teleopInit;
-      if (fn) fn();
+      call(pick(mode, h.autonomousInit, h.teleopInit, h.utilityInit));
     }
     static void callInitLoop(const Hooks& h, OpMode mode) {
-      auto fn = mode == OpMode::AUTO ? h.autonomousInitLoop : h.teleopInitLoop;
-      if (fn) fn();
+      call(pick(mode, h.autonomousInitLoop, h.teleopInitLoop, h.utilityInitLoop));
     }
     static void callStart(const Hooks& h, OpMode mode) {
-      auto fn = mode == OpMode::AUTO ? h.autonomousStart : h.teleopStart;
-      if (fn) fn();
+      call(pick(mode, h.autonomousStart, h.teleopStart, h.utilityStart));
     }
     static void callLoop(const Hooks& h, OpMode mode) {
-      auto fn = mode == OpMode::AUTO ? h.autonomousLoop : h.teleopLoop;
-      if (fn) fn();
+      call(pick(mode, h.autonomousLoop, h.teleopLoop, h.utilityLoop));
     }
     static void callStop(const Hooks& h, OpMode mode) {
-      auto fn = mode == OpMode::AUTO ? h.autonomousStop : h.teleopStop;
-      if (fn) fn();
+      call(pick(mode, h.autonomousStop, h.teleopStop, h.utilityStop));
     }
 
     void publish(robot::StateService& rs, uint32_t now) {
@@ -266,7 +280,8 @@ namespace probot::core {
           s.phase == robot::Phase::AUTO_RUN && s.autoStartMs != 0 &&
           s.autoPeriodSeconds > 0 &&
           (int32_t)(now - s.autoStartMs) >= s.autoPeriodSeconds * 1000) {
-        rs.setControl(now, robot::Status::STOP, OpMode::TELEOP);
+        rs.setControl(now, robot::Status::STOP, OpMode::TELEOP,
+                      robot::opModes().preferred(OpMode::TELEOP));
         return { OpMode::TELEOP, Stage::TRANSITION };
       }
 

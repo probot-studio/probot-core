@@ -38,6 +38,21 @@ Biçim [Keep a Changelog](https://keepachangelog.com/), sürümler
   an `Alerts` list (`errors` / `warnings` / `infos`) and WPILib field order
   for `PIDController` folders; a tunable PID also shows `measurement` and
   `error` from its `/Telemetry` twin.
+- OpMode list: `probot::ds::setOpModeOptions()` publishes named options
+  (id, mode, name, group, description) for the Driver Station, which shows
+  a selector for the selected mode and sends `cmd=opmode&id=N`;
+  `ds::selectedOpModeId()` returns the choice and `ds::activeOpModeId()`
+  the option the current run was INITed with. New `GET /opmodes`; the `'S'`
+  frame and `/getState` gain `opMode`, `omv` and `util`.
+- `UTILITY` mode for setup and maintenance code: optional weak
+  `utilityInit/InitLoop/Start/Loop/Stop` hooks, `cmd=mode&val=utility`,
+  no match timer, purple blinking status LED. Offered only when
+  `utilityLoop()` is defined or a utility option is listed. Protocol
+  addition: `robot::Phase` gains `UTILITY_INIT = 6` and `UTILITY_RUN = 7`
+  (existing values unchanged); clients that only know 0-5 must treat
+  unknown phases as not running. A sketch that already has its own
+  function named `utilityInit`, `utilityLoop` etc. now gets it called as a
+  hook; rename it.
 
 ### Changed
 - `probot::emergencyStop()` moved to `robot/state.hpp` and

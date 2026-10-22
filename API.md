@@ -34,6 +34,7 @@ opsiyoneldir ama donanım hazırlığı için ana iskelette gösterilir.
 | `teleopStart()` | TeleOp START anında, 1 kez | Opsiyonel (weak; tanımlanmazsa boş sayılır) |
 | `teleopLoop()` | TeleOp RUN boyunca, `USER_LOOP_PERIOD_MS` | **Zorunlu** |
 | `teleopStop()` | TeleOp INIT/RUN'dan her çıkışta, 1 kez | **Zorunlu** |
+| `utilityInit()`, `utilityInitLoop()`, `utilityStart()`, `utilityLoop()`, `utilityStop()` | Utility modunda, TeleOp karşılıklarıyla aynı zamanlarda | Opsiyonel (weak) |
 
 Akış:
 
@@ -47,7 +48,11 @@ TRANSITION ──INIT──▶ INIT[TELEOP]
 ```
 
 - Mod yalnız STOPPED/TRANSITION'da seçilir. INIT/RUN sırasında `cmd=mode`
-  409 döndürür; önce STOP gerekir.
+  ve `cmd=opmode` 409 döndürür; önce STOP gerekir.
+- **Utility**, kurulum ve bakım kodu (sensör kalibrasyonu, mekanizma
+  homing'i, test) için üçüncü moddur. DS'te yalnız sketch `utilityLoop()`
+  tanımladıysa ya da bir framework utility seçeneği listelediyse görünür.
+  Süresi yoktur ve TRANSITION'a geçmez; input'lar RUN'da açıktır.
 - Otonom sayacı `autonomousStart()` döndükten sonra başlar. Süre bitince
   TeleOp **çalışmaya başlamaz**; yalnız önseçilir ve yeni bir INIT beklenir.
 - **Tüm hook'lar tek kalıcı task'ta** çalışır (**core 1**); boot'ta açılır,
@@ -180,7 +185,7 @@ Ek bir sinyal lambası (FRC RSL tarzı) için düz bir digital pin verin:
 #define PROBOT_RSL_PIN 10   // probot.h'den önce
 ```
 
-Kütüphane bu pini yalnız AUTO_RUN/TELEOP_RUN'da yanıp söndürür; INIT,
+Kütüphane bu pini yalnız AUTO_RUN/TELEOP_RUN/UTILITY_RUN'da yanıp söndürür; INIT,
 STOPPED, TRANSITION ve E-stop'ta **sabit açık** tutar.
 
 ## Robot durumu (ileri seviye)
@@ -188,8 +193,10 @@ STOPPED, TRANSITION ve E-stop'ta **sabit açık** tutar.
 ```cpp
 auto s = probot::robot::state().read();   // atomik snapshot
 // s.status : Status::INIT/START/STOP
-// s.phase  : STOPPED/AUTO_INIT/AUTO_RUN/TELEOP_INIT/TELEOP_RUN/TRANSITION
-// s.selectedMode : OpMode::AUTO/TELEOP
+// s.phase  : STOPPED/AUTO_INIT/AUTO_RUN/TELEOP_INIT/TELEOP_RUN/TRANSITION/
+//            UTILITY_INIT/UTILITY_RUN
+// s.selectedMode : OpMode::AUTO/TELEOP/UTILITY
+// s.opModeId : seçili OpMode seçeneğinin id'si (0 = yok)
 // s.autoPeriodSeconds, s.autoStartMs
 // s.clientCount, s.deadlineMiss, s.batteryVoltage
 ```
@@ -204,6 +211,10 @@ Protokolde `Phase` sayıları sabittir:
 | 3 | `TELEOP_INIT` |
 | 4 | `TELEOP_RUN` |
 | 5 | `TRANSITION` |
+| 6 | `UTILITY_INIT` |
+| 7 | `UTILITY_RUN` |
+
+6 ve 7 sonradan eklendi; eski istemciler bunları bilmeyebilir.
 
 `status`, son kabul edilen komut evresini koruyan sade alan olarak
 `Status::INIT` (0), `Status::START` (1), `Status::STOP` (2) taşır. Gerçek,
@@ -216,18 +227,56 @@ hook'u tamamlanmış evre için daima `phase` kullanılmalıdır.
 | Fonksiyon | Döner |
 |---|---|
 | `ds::phase()` | Çalışan faz; acil durdurma kilitlendiyse `Phase::STOPPED` |
-| `ds::selectedMode()` | DS'te seçili mod (`OpMode::AUTO` / `TELEOP`) |
+| `ds::selectedMode()` | DS'te seçili mod (`OpMode::AUTO` / `TELEOP` / `UTILITY`) |
+| `ds::selectedOpModeId()` | DS'te seçili OpMode seçeneğinin id'si; seçili modda seçenek yoksa `0`. Otonom süresi dolunca, koşu bitmeden TeleOp seçimine döner |
+| `ds::activeOpModeId()` | Şu anki (ya da son) koşunun INIT'te aldığı seçenek id'si; ilk INIT'ten önce `0`. Hook'larda bunu kullanın |
+| `ds::utilityAvailable()` | Utility seçilebilir: `utilityLoop()` tanımlı ya da utility seçeneği listelenmiş |
 | `ds::outputsEnabled()` | Aktüatör sürülebilir: başlamış RUN, stall yok, acil durdurma yok |
 | `ds::isEStopped()` | Acil durdurma kilitli (reboot'a kadar) |
 | `ds::isAttached()` | Robotu sahiplenmiş bir DS istemcisi var |
 | `ds::matchTimeSeconds()` | Otonom süresinden kalan saniye (AUTO_RUN'da); zamanlı dönem yoksa `-1` |
-| `ds::packetSeq()` | Her DS joystick paketinde ve kabul edilen mod/INIT/START/STOP komutunda artar (acil durdurma ve reboot isteğinde artmaz) |
+| `ds::packetSeq()` | Her DS joystick paketinde ve kabul edilen mod/OpMode/INIT/START/STOP komutunda artar (acil durdurma ve reboot isteğinde artmaz) |
 | `ds::rawGamepad(port, out)` | Kapısız son joystick karesi, her fazda (yalnız `port` 0). Kare yoksa `false` |
 
 `probot::io::rawGamepad()` aynı kapısız kaynağın servisidir. Menü, otonom
 seçimi ve buton eşlemesi içindir; motor **sürmeyin**: aktüatör için kapılı
 `probot::io::gamepad()` / `joystick_api` kullanın. Kapısız veri de bağlantı
 kesilince `PROBOT_INPUT_TIMEOUT_MS` sonra sıfırlanır.
+
+### OpMode listesi
+
+Birden çok otonom ya da teleop programı olan kod (ör. bir framework),
+seçenekleri DS'e listeler; DS seçili moddaki seçenekleri bir açılır listede
+gösterir:
+
+```cpp
+static const probot::ds::OpModeOption kOptions[] = {
+  // id (0 olmaz, benzersiz), mod, ad, grup (opsiyonel), açıklama (opsiyonel)
+  {101, probot::ds::OpMode::AUTO,    "Sol",    "Otonom", "Topla ve çık"},
+  {102, probot::ds::OpMode::AUTO,    "Sağ",    "Otonom", nullptr},
+  {201, probot::ds::OpMode::TELEOP,  "Arcade", nullptr,  nullptr},
+  {301, probot::ds::OpMode::UTILITY, "Kol homing", nullptr, nullptr},
+};
+// INIT'ten önce çalışan bir sketch hook'u yok: listeyi statik ilklendirme
+// ile verin (framework varsa boot'ta da olur). Metinler kopyalanır.
+static const bool kListed = probot::ds::setOpModeOptions(kOptions, 4);
+
+void autonomousInit() {
+  uint64_t id = probot::ds::activeOpModeId(); // bu koşunun seçeneği
+}
+```
+
+- En çok 64 seçenek; ad ve grup en çok 63, açıklama 255 bayt (liste ve
+  JSON'u heap'te tutulur; uzun açıklamalı büyük bir liste onlarca KB yer). Geçersiz
+  liste (`id` 0 ya da tekrarlı, boş ya da sınırı aşan metin, 64'ten fazla
+  seçenek, bilinmeyen mod) ya da bellek yetmezse `false` döner, eski liste
+  kalır; metin kısaltılmaz. Liste her an değiştirilebilir.
+- Mod seçilince o modun son seçilen (yoksa ilk) seçeneği seçilir. Otonom
+  süresi dolup TeleOp önseçildiğinde de aynı kural geçerlidir.
+- Robot STOPPED iken seçili seçenek yeni listede yoksa, o modun son seçilen
+  (yoksa ilk) seçeneğine geçer. INIT/RUN sırasında seçim değişmez; liste o
+  sırada değiştiyse düzeltme bir sonraki INIT'te yapılır. Utility seçiliyken
+  Utility artık sunulmuyorsa seçim TeleOp'a geçer.
 
 ## Framework katmanı (ileri seviye)
 
@@ -419,14 +468,16 @@ yazacaksanız:
 | `/` | GET | gerekli | Driver Station arayüzü (SPA) |
 | `/joystick` | WS | gerekli | Çift yönlü binary kanal (çerçeve formatları aşağıda) |
 | `/updateController` | POST | gerekli | JSON fallback: `{"axes":[...],"buttons":[...]}` — WS koptuğunda |
-| `/robotControl?cmd=mode&val=auto\|teleop` | GET | gerekli | STOPPED/TRANSITION'da OpMode seçer; INIT/RUN'da 409 |
+| `/robotControl?cmd=mode&val=auto\|teleop\|utility` | GET | gerekli | STOPPED/TRANSITION'da modu (ve o modun tercih edilen OpMode seçeneğini) seçer; INIT/RUN'da 409. `utility` yalnız `util` true iken |
+| `/robotControl?cmd=opmode&id=N` | GET | gerekli | Listelenmiş bir OpMode seçeneğini (ve modunu) seçer; `id` ondalık metin. Listede yoksa 400, INIT/RUN'da 409 |
+| `/opmodes` | GET | gerekli | `{"options":[{"id":"101","mode":"auto","name":"Sol","group":"Otonom","description":"..."}]}`. `id` 64 bitlik olabildiği için metindir. Liste hiç verilmediyse `{"options":[]}`. Liste değişince `omv` artar; yanıt sırasında değişirse bağlantı kapanır, yeniden isteyin |
 | `/robotControl?cmd=init&autoLen=N` | GET | gerekli | Seçili modu INIT'e alır; yalnız STOPPED/TRANSITION |
 | `/robotControl?cmd=start&autoLen=N` | GET | gerekli | Seçili modu RUN'a alır; yalnız ilgili INIT fazı |
 | `/robotControl?cmd=stop` | GET | gerekli | INIT/RUN'dan (ya da kabul edilmiş ama henüz faza yansımamış bir INIT/START'tan) kooperatif stop; diğer durumlarda 409 |
 | `/robotControl?cmd=estop` | GET | gerekli | **Acil durdurma**: kullanıcı task'ı öldürülür, aktif `stop()` watchdog'lu (`PROBOT_ESTOP_END_MS`) çalışır, enable pini kesilir, robot reboot'a kadar kilitlenir |
 | `/robotControl?cmd=reboot` | GET | gerekli | Çipi yeniden başlatır (`ESP.restart()`) — estop kilidini temizlemenin yolu |
 | `/setChannel?ch=N` | GET | gerekli | Kanalı NVS'e kaydet; 1-13 ise CSA ile **canlı** geçiş (zaten o kanaldaysa `live:false`), `0` = kaydı temizle, açılışta firmware varsayılanına dön. Dönüş: `{"ok":b,"ch":N,"live":b}` |
-| `/getState` | GET | gerekli | `{"status":N,"phase":N,"selectedMode":"auto|teleop","autoPeriodSeconds":N,"autoRemainingMs":N,"batt":V.V,"estop":b}` (WS yokken fallback). `batt`: pil gerilimi (bölücü/INA otomatik ya da `setBatteryVoltage()` elle), `0.0` = veri yok |
+| `/getState` | GET | gerekli | `{"status":N,"phase":N,"selectedMode":"auto|teleop|utility","autoPeriodSeconds":N,"autoRemainingMs":N,"batt":V.V,"estop":b,"opMode":"N","omv":N,"util":b}` (WS yokken fallback). `opMode`: seçili OpMode seçeneği (`"0"` = yok), `omv`: OpMode listesinin sürüm sayacı, `util`: Utility seçilebilir. `batt`: pil gerilimi (bölücü/INA otomatik ya da `setBatteryVoltage()` elle), `0.0` = veri yok |
 | `/telemetry` | GET | gerekli | Telemetri tamponunun içeriği (text) (WS yokken fallback) |
 | `/getBattery` | GET | serbest | Pil gerilimi (kaynak: `PROBOT_BATTERY_ADC_PIN` bölücü, `PROBOT_BATTERY_INA` sensörü ya da elle `probot::setBatteryVoltage()`) |
 | `/health` | GET | serbest | `{"rssi":N,"up":ms,"heap":N,"dm":b,"joyAgeMs":N,"sta":N,"disc":N,"dashTopics":N,"dashBytes":N,"dashDropped":N}`: izleme/hakem için. `joyAgeMs`: son joystick paketinin yaşı (-1 = hiç gelmedi), `sta`: bağlı istemci sayısı, `disc`: son kopuşun IEEE reason kodu, `dash*`: dashboard topic sayısı, kullanılan bayt, düşürülen yazma/değer |

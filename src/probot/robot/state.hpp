@@ -10,9 +10,11 @@ namespace probot::robot {
     AUTO_RUN=2,
     TELEOP_INIT=3,
     TELEOP_RUN=4,
-    TRANSITION=5
+    TRANSITION=5,
+    UTILITY_INIT=6,
+    UTILITY_RUN=7
   };
-  enum class OpMode : uint8_t { AUTO=0, TELEOP=1 };
+  enum class OpMode : uint8_t { AUTO=0, TELEOP=1, UTILITY=2 };
 
   struct StateSnapshot {
     uint32_t ms;
@@ -20,6 +22,8 @@ namespace probot::robot {
     Status   status;
     Phase    phase;
     OpMode   selectedMode;
+    uint64_t opModeId;          // selected OpMode option, 0 = none
+    uint64_t activeOpModeId;    // opModeId latched by the last INIT
     float    batteryVoltage;
     int32_t  autoPeriodSeconds;
     uint32_t autoStartMs;
@@ -33,16 +37,49 @@ namespace probot::robot {
       _cur = 0;
       StateSnapshot s{};
       s.ms=0; s.seq=0; s.status=Status::STOP; s.phase=Phase::STOPPED;
-      s.selectedMode=OpMode::TELEOP; s.batteryVoltage=0.0f;
+      s.selectedMode=OpMode::TELEOP; s.opModeId=0; s.activeOpModeId=0; s.batteryVoltage=0.0f;
       s.autoPeriodSeconds=30; s.autoStartMs=0; s.clientCount=0; s.deadlineMiss=false;
       _buf[0] = s; _buf[1] = s;
     }
 
-    void setStatus(uint32_t now_ms, Status st){ writeField(now_ms, [&](StateSnapshot& w){ w.status = st; }); }
+    // INIT latches the selected option: the run keeps reporting it even
+    // after autonomous expiry preselects the TeleOp choice.
+    void setStatus(uint32_t now_ms, Status st){
+      writeField(now_ms, [&](StateSnapshot& w){
+        w.status = st;
+        if (st == Status::INIT) w.activeOpModeId = w.opModeId;
+      });
+    }
     void setPhase(uint32_t now_ms, Phase ph){ writeField(now_ms, [&](StateSnapshot& w){ w.phase = ph; }); }
     void setSelectedMode(uint32_t now_ms, OpMode mode){ writeField(now_ms, [&](StateSnapshot& w){ w.selectedMode = mode; }); }
     void setControl(uint32_t now_ms, Status st, OpMode mode){
       writeField(now_ms, [&](StateSnapshot& w){ w.status = st; w.selectedMode = mode; });
+    }
+    // Mode and OpMode option change together so readers never see a mix.
+    void setSelection(uint32_t now_ms, OpMode mode, uint64_t opModeId){
+      writeField(now_ms, [&](StateSnapshot& w){ w.selectedMode = mode; w.opModeId = opModeId; });
+    }
+    void setControl(uint32_t now_ms, Status st, OpMode mode, uint64_t opModeId){
+      writeField(now_ms, [&](StateSnapshot& w){ w.status = st; w.selectedMode = mode; w.opModeId = opModeId; });
+    }
+    // setSelection() only while a mode change is allowed (the rule of
+    // core::canAcceptModeChange: STOPPED or TRANSITION, nothing pending),
+    // checked and written in one critical section.
+    bool setSelectionIfIdle(uint32_t now_ms, OpMode mode, uint64_t opModeId){
+      probot::core::MuxGuard guard(_mux);
+      if (!idleLocked()) return false;
+      writeLocked(now_ms, [&](StateSnapshot& w){ w.selectedMode = mode; w.opModeId = opModeId; });
+      return true;
+    }
+    // The same, only if the selection is still (fromMode, fromId): a
+    // concurrent Driver Station choice wins over a library correction.
+    bool replaceSelectionIfIdle(uint32_t now_ms, OpMode fromMode, uint64_t fromId,
+                                OpMode mode, uint64_t opModeId){
+      probot::core::MuxGuard guard(_mux);
+      const StateSnapshot& c = _buf[_cur];
+      if (!idleLocked() || c.selectedMode != fromMode || c.opModeId != fromId) return false;
+      writeLocked(now_ms, [&](StateSnapshot& w){ w.selectedMode = mode; w.opModeId = opModeId; });
+      return true;
     }
     void setBatteryVoltage(uint32_t now_ms, float v){ writeField(now_ms, [&](StateSnapshot& w){ w.batteryVoltage = v; }); }
     void setAutoPeriodSeconds(uint32_t now_ms, int32_t s){ writeField(now_ms, [&](StateSnapshot& w){ w.autoPeriodSeconds = s; }); }
@@ -64,11 +101,21 @@ namespace probot::robot {
     Status   status() const            { return read().status; }
     Phase    phase() const             { return read().phase; }
     OpMode   selectedMode() const      { return read().selectedMode; }
+    uint64_t opModeId() const          { return read().opModeId; }
+    uint64_t activeOpModeId() const    { return read().activeOpModeId; }
 
   private:
+    bool idleLocked() const {
+      const StateSnapshot& c = _buf[_cur];
+      return (c.phase == Phase::STOPPED || c.phase == Phase::TRANSITION) && c.status == Status::STOP;
+    }
     template<typename Fn>
     void writeField(uint32_t now_ms, Fn fn){
       probot::core::MuxGuard guard(_mux);
+      writeLocked(now_ms, fn);
+    }
+    template<typename Fn>
+    void writeLocked(uint32_t now_ms, Fn fn){
       uint32_t cur = _cur;
       uint32_t w   = 1u - cur;
       StateSnapshot s = _buf[cur];
@@ -101,6 +148,9 @@ namespace probot::robot {
   // INIT, START or STOP command; lets polling code detect "new DS data"
   // without comparing values.
   inline volatile uint32_t g_ds_packet_seq = 0;
+
+  // Non-zero when the sketch defines utilityLoop(); set by runtime_setup().
+  inline volatile uint32_t g_utility_hooks = 0;
   inline void noteDsPacket(){
     __atomic_add_fetch(&g_ds_packet_seq, 1u, __ATOMIC_SEQ_CST);
   }
