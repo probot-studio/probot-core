@@ -6,10 +6,11 @@
 // optional hooks; an undefined weak declaration is bound to the empty default
 // by the runtime. A sketch definition overrides it.
 //
-// [PB-E201] "undefined reference to `teleopLoop()`" (veya autonomousLoop/
-//   autonomousStop/teleopStop): zorunlu bir hook sketch'te tanımlanmamış.
+// [PB-E201] "undefined reference to `_Z10teleopLoopv'" (mangled name; also
+//   autonomousLoop/autonomousStop/teleopStop): zorunlu bir hook sketch'te
+//   tanımlanmamış.
 //   Boş da olsa dördünü tanımlayın. Docs: probotstudio.com/docs/hatalar/#pb-e201
-// [PB-E202] "multiple definition of `setup()`/`loop()`": setup()/loop()
+// [PB-E202] "redefinition of 'void setup()'" (or loop()): setup()/loop()
 //   kütüphaneye aittir, sketch'te TANIMLANMAZ — hook'ları kullanın.
 //   Docs: probotstudio.com/docs/hatalar/#pb-e202
 void autonomousInit() __attribute__((weak));

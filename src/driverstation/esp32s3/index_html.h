@@ -71,7 +71,7 @@ const char MAIN_page[] PROGMEM = R"=====(
       border-bottom:1px solid rgba(214,54,0,0.10);
       backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
     }
-    .header-left{display:flex;align-items:center;gap:9px;flex:none;text-decoration:none;}
+    .header-left{display:flex;align-items:center;gap:9px;flex:none;text-decoration:none;color:var(--ink);}
     .mark{
       width:32px;height:32px;flex:none;display:grid;place-items:center;
       border-radius:34% 66% 62% 38%/40% 42% 58% 60%;

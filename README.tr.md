@@ -318,7 +318,7 @@ Makine-okur özet: [`llms.txt`](llms.txt) · Tam referans: [`API.md`](API.md)
 | Joystick görünmüyor | Kumandada herhangi bir tuşa basın (tarayıcı gamepad'i tuşa basılınca tanır) |
 | Kumandam yok | Joystick sekmesi → **Klavye** (bilgisayarda) ya da **Dokunmatik** (telefonda) kaynağını elle etkinleştirin — otomatik seçilmez |
 | Sık kopma | Kanal çakışması — robotlara **farklı sabit kanallar** verin (varsayılanlar: 1/6/11) |
-| `undefined reference to teleopLoop` | Zorunlu hook eksik [PB-E201] — dördünü de tanımlayın (boş olabilir) |
+| `` undefined reference to `_Z10teleopLoopv' `` | Zorunlu hook eksik [PB-E201] (bağlayıcı adı karışık yazar) — dördünü de tanımlayın (boş olabilir) |
 | Kırmızı yanıp sönen LED, robot tepkisiz | Deadline miss [PB-E301] — loop 2 sn dönmedi; [detay](https://probotstudio.com/docs/hatalar/#pb-e301) |
 | Servo titriyor | Yukarıdaki "Servo kullanımı" bölümü |
 

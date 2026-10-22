@@ -371,7 +371,7 @@ Machine-readable summary: [`llms.txt`](llms.txt) · Full reference: [`API.md`](A
 | Joystick not visible | Press any button on the gamepad (browsers only detect a gamepad after a button press) |
 | No gamepad | In the Joystick tab, manually enable the **Keyboard** (on a computer) or **Touch** (on a phone) source; it is not selected automatically |
 | Frequent disconnects | Channel conflict: give robots **different fixed channels** (defaults: 1/6/11) |
-| `undefined reference to teleopLoop` | A mandatory hook is missing [PB-E201]: define all four (they may be empty) |
+| `` undefined reference to `_Z10teleopLoopv' `` | A mandatory hook is missing [PB-E201] (the linker prints the mangled name): define all four (they may be empty) |
 | Blinking red LED, robot unresponsive | Deadline miss [PB-E301]: the loop did not return for 2 s; [details](https://probotstudio.com/docs/hatalar/#pb-e301) |
 | Servo jitters | See "Servo usage" above |
 
