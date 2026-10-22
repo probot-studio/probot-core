@@ -209,6 +209,76 @@ Protokolde `Phase` sayıları sabittir:
 `Status::INIT` (0), `Status::START` (1), `Status::STOP` (2) taşır. Gerçek,
 hook'u tamamlanmış evre için daima `phase` kullanılmalıdır.
 
+## Tipli durum: `probot::ds` (ileri seviye)
+
+`#include <probot/api.hpp>` ile her `.cpp` dosyasından kullanılabilir.
+
+| Fonksiyon | Döner |
+|---|---|
+| `ds::phase()` | Çalışan faz; acil durdurma kilitlendiyse `Phase::STOPPED` |
+| `ds::selectedMode()` | DS'te seçili mod (`OpMode::AUTO` / `TELEOP`) |
+| `ds::outputsEnabled()` | Aktüatör sürülebilir: başlamış RUN, stall yok, acil durdurma yok |
+| `ds::isEStopped()` | Acil durdurma kilitli (reboot'a kadar) |
+| `ds::isAttached()` | Robotu sahiplenmiş bir DS istemcisi var |
+| `ds::matchTimeSeconds()` | Otonom süresinden kalan saniye (AUTO_RUN'da); zamanlı dönem yoksa `-1` |
+| `ds::packetSeq()` | Her DS joystick paketinde ve kabul edilen mod/INIT/START/STOP komutunda artar (acil durdurma ve reboot isteğinde artmaz) |
+| `ds::rawGamepad(port, out)` | Kapısız son joystick karesi, her fazda (yalnız `port` 0). Kare yoksa `false` |
+
+`probot::io::rawGamepad()` aynı kapısız kaynağın servisidir. Menü, otonom
+seçimi ve buton eşlemesi içindir; motor **sürmeyin**: aktüatör için kapılı
+`probot::io::gamepad()` / `joystick_api` kullanın. Kapısız veri de bağlantı
+kesilince `PROBOT_INPUT_TIMEOUT_MS` sonra sıfırlanır.
+
+## Framework katmanı (ileri seviye)
+
+Kendi döngüsünü süren bir katman (ör. robot framework SDK'sı) user task'ta
+her fazda çalışabilir:
+
+```cpp
+#include <probot/api.hpp>
+static const bool kInstalled = probot::framework::install({
+  &onBoot,          // user task'ta, ilk turdan önce bir kez
+  &onPreCycle,      // her turda, TÜM fazlarda, OpMode hook'undan önce
+  &onPostCycle,     // her turda, TÜM fazlarda, OpMode hook'undan sonra
+  &onEmergencyStop  // acil durdurmada, user task silindikten sonra
+});
+```
+
+- `install()` bir kez ve runtime başlamadan önce kabul edilir (statik
+  ilklendirme uygundur); sonrası `false` döner. Her alan `nullptr` olabilir.
+- `preCycle`/`postCycle` INIT ve RUN fazlarında OpMode hook'larıyla aynı
+  stall sınırına (`PROBOT_LOOP_DEADLINE_MS`, PB-E301) tabidir. STOPPED ve
+  TRANSITION'da stall denetimi yoktur; orada takılma algılanmaz.
+- `emergencyStop` user task silindikten sonra core 1'de yeni bir task'ta,
+  aktif `stop()` hook'undan önce çalışır. Stop hook'uyla birlikte
+  `PROBOT_ESTOP_END_MS` içinde bitmezse çip reboot eder (PB-E305). Kısa
+  olmalı, user kodunun tutmuş olabileceği kilitleri almamalı: çıkışları
+  güvenli duruma alıp dönmelidir.
+- Kaydı sketch'ten referans edin (ya da PlatformIO'da `lib_archive = no`):
+  arşivlenmiş bir kütüphane nesnesine hiçbir şey referans vermiyorsa linker
+  onu statik ilklendiricisiyle birlikte atabilir.
+- Sketch `#include <probot.h>`'den önce `PROBOT_FRAMEWORK` tanımlarsa OpMode
+  hook'larının hepsi isteğe bağlı olur (PB-E201 link hatası çıkmaz).
+  Tanımlanan hook'lar framework turunun içinde çalışmaya devam eder. Bu
+  modda yanlış yazılmış bir hook adı hata vermez, sadece çalışmaz.
+
+### Config-free başlık ve sürüm makroları
+
+`<probot/api.hpp>` WiFi/batarya makrosu istemez; sketch dışındaki `.cpp`
+dosyalarından eklenir. Durum, `probot::ds`, `probot::framework`, telemetri,
+gamepad/joystick tipleri ve sürüm makrolarını içerir. `<probot.h>` bunu da
+ekler ve runtime'ı (WiFi AP, DS, `setup()`/`loop()`) kurar; yalnız sketch'te
+bir kez eklenir.
+
+```cpp
+#if defined(PROBOT_VERSION) && PROBOT_VERSION >= PROBOT_VERSION_OF(0, 5, 0)
+// ...
+#endif
+```
+
+`PROBOT_VERSION_MAJOR`, `PROBOT_VERSION_MINOR`, `PROBOT_VERSION_PATCH`,
+`PROBOT_VERSION_STRING` de tanımlıdır.
+
 ## Yapılandırma makroları
 
 Tamamı `#include <probot.h>`'den **önce** tanımlanır. Tablo:
@@ -227,6 +297,8 @@ Yaşam döngüsü / güvenlik makroları:
 | `PROBOT_ESTOP_END_MS` | 500 | Acil durdurmada aktif `stop()` hook'una tanınan süre; aşılırsa reboot |
 | `PROBOT_ESTOP_ENABLE_PIN` | -1 | Kütüphanenin sürdüğü enable GPIO'su (-1 = kapalı). Boot'ta HIGH, estop'ta LOW |
 | `USER_LOOP_PERIOD_MS` | 20 | Loop çağrı periyodu (~50 Hz) |
+| `PROBOT_USER_STACK` | 8192 | User task stack'i, bayt (en az 4096, PB-E107) |
+| `PROBOT_FRAMEWORK` | tanımsız | Tanımlıysa OpMode hook'larının hepsi isteğe bağlı (framework katmanı için) |
 
 ## Hata kodları (PB-Exx)
 
@@ -243,6 +315,7 @@ zamanı · **E4xx** protokol/HTTP (E409, HTTP 409'un karşılığıdır).
 | PB-E104 | Derleme | Batarya ADC konfigürasyonu geçersiz — pin ADC1 dışında (S3'te GPIO1-10 şart; ADC2 WiFi açıkken çalışmaz) ya da bölücü dirençleri (`_R_TOP_K`/`_R_BOT_K`) eksik |
 | PB-E105 | Derleme | Batarya kaynak çakışması/geçersiz seçim — hem `PROBOT_BATTERY_ADC_PIN` hem `PROBOT_BATTERY_INA` tanımlı; ya da `_INA` 219/226 değil; ya da `_TRIM` 0.5-2.0 dışında |
 | PB-E106 | Derleme | `redefinition of void robotInit()` / `robotEnd()`: 0.3.x hook'ları 0.4.0'da kaldırıldı; kurulum kodunu `teleopInit()`/`autonomousInit()`'e, güvenli durdurmayı `teleopStop()`/`autonomousStop()`'a taşıyın |
+| PB-E107 | Derleme | `PROBOT_USER_STACK` 4096 bayttan küçük |
 | PB-E201 | Bağlama | Zorunlu hook tanımsız — `undefined reference to teleopLoop()` vb. Dördü de (boş olsa bile) tanımlanmalı |
 | PB-E202 | Bağlama | `setup()`/`loop()` sketch'te tanımlanmış — kütüphaneye aittir, hook'ları kullanın |
 | PB-E301 | Çalışma | Deadline miss / stall: bir `initLoop`/`loop` turu `PROBOT_LOOP_DEADLINE_MS`'i (ya da tek seferlik `init`/`start`/`stop` hook'u `PROBOT_HOOK_DEADLINE_MS`'i) aştı; girişler sıfır, halt-safe |

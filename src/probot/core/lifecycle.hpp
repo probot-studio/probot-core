@@ -140,6 +140,26 @@ namespace probot::core {
       }
     }
 
+    // One user-task iteration with an optional framework around step():
+    // preCycle and postCycle run in every stage, each with a freshly stamped
+    // heartbeat (its own loop-deadline budget in INIT/RUN). The heartbeat is
+    // stamped again when the iteration ends.
+    void cycle(const Hooks& h, void (*preCycle)(), void (*postCycle)(),
+               DesiredState requested, robot::StateService& rs, uint32_t now,
+               void (*neutralize)() = nullptr, volatile uint32_t* hb = nullptr,
+               uint32_t (*clockNow)() = nullptr) {
+      if (preCycle) {
+        primeHeartbeat(timeNow(now, clockNow), hb);
+        preCycle();
+      }
+      step(h, requested, rs, timeNow(now, clockNow), neutralize, hb, clockNow);
+      if (postCycle) {
+        primeHeartbeat(timeNow(now, clockNow), hb);
+        postCycle();
+      }
+      primeHeartbeat(timeNow(now, clockNow), hb);
+    }
+
   private:
     static void primeHeartbeat(uint32_t now, volatile uint32_t* hb) {
       if (!hb) return;

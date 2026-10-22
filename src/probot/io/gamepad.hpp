@@ -91,4 +91,23 @@ namespace probot::io {
     mutable volatile uint32_t _timeout_ms;
     probot::core::Mux _mux;
   };
+
+  namespace detail {
+    inline GamepadService g_gamepad_singleton;
+    inline GamepadService g_raw_gamepad_singleton;
+  }
+
+  // Gated input for user code: neutral unless the robot is in a started,
+  // unstalled RUN phase. Use this for anything that drives actuators.
+  inline GamepadService& gamepad(){
+    return detail::g_gamepad_singleton;
+  }
+
+  // Ungated input: the last frame the Driver Station sent, in any phase
+  // (still neutral once it is older than PROBOT_INPUT_TIMEOUT_MS or the DS
+  // owner is released). For menus, auto selection and button bindings while
+  // disabled; never drive actuators from it.
+  inline GamepadService& rawGamepad(){
+    return detail::g_raw_gamepad_singleton;
+  }
 }
