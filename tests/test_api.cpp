@@ -4,6 +4,9 @@
 #include <probot/api.hpp>
 #include "gamepad_test_util.hpp"
 
+#include <cmath>
+#include <limits>
+
 extern unsigned long _test_millis_now;
 
 #if !defined(PROBOT_VERSION_MAJOR) || !defined(PROBOT_VERSION_MINOR) || !defined(PROBOT_VERSION_PATCH)
@@ -214,4 +217,30 @@ TEST_CASE(ds_rsl_state_and_comms_disable_count_read_the_runtime_counters){
   EXPECT_TRUE(probot::ds::commsDisableCount() == 3u);
   g_rsl_on = 0;
   g_comms_disable_count = 0;
+}
+
+TEST_CASE(battery_current_is_declared_without_battery_macros_and_nan_without_sensor){
+  // This file defines no battery source.
+  EXPECT_TRUE(std::isnan(probot::io::battery::currentAmps()));
+}
+
+TEST_CASE(battery_low_voltage_flag_follows_the_threshold){
+  namespace battery = probot::io::battery;
+  using namespace probot::robot;
+  state().setBatteryVoltage(1u, 11.0f);
+  EXPECT_TRUE(!battery::isLowVoltage());                // off by default
+  EXPECT_TRUE(battery::setLowVoltage(11.5f));
+  EXPECT_TRUE(battery::isLowVoltage());
+  state().setBatteryVoltage(2u, 12.0f);
+  EXPECT_TRUE(!battery::isLowVoltage());
+  state().setBatteryVoltage(3u, 0.0f);                  // no reading is not low
+  EXPECT_TRUE(!battery::isLowVoltage());
+  EXPECT_TRUE(!battery::setLowVoltage(-1.0f));
+  EXPECT_TRUE(!battery::setLowVoltage(std::numeric_limits<float>::quiet_NaN()));
+  EXPECT_TRUE(!battery::setLowVoltage(100.0f));
+  state().setBatteryVoltage(4u, 11.0f);
+  EXPECT_TRUE(battery::isLowVoltage());                 // refused values keep the threshold
+  EXPECT_TRUE(battery::setLowVoltage(0.0f));
+  EXPECT_TRUE(!battery::isLowVoltage());
+  state().setBatteryVoltage(5u, 0.0f);
 }

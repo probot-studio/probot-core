@@ -29,6 +29,7 @@
 // does not trigger its own 'S' frame push.
 #include <stdint.h>
 #include <probot/robot/state.hpp>
+#include <probot/io/battery_status.hpp>
 
 // ---- konfigürasyon doğrulama ----
 #if defined(PROBOT_BATTERY_ADC_PIN) && defined(PROBOT_BATTERY_INA)
@@ -151,7 +152,6 @@ namespace detail {
   inline unsigned g_lastPubDv  = ~0u;
   inline uint32_t g_lastPollMs = 0;
   inline bool     g_inited     = false;
-  inline float    g_currentA   = 0.0f;   // INA varken son akım örneği
   inline uint8_t  g_failStreak = 0;      // ardışık I2C hatası
   inline bool     g_faultAnnounced = false;
 
@@ -263,10 +263,13 @@ namespace detail {
     out = vAdc * dividerRatio((float)PROBOT_BATTERY_R_TOP_K, (float)PROBOT_BATTERY_R_BOT_K);
     return true;
 #else
-    float v;
-    if (!inaBusVolts(v)) return false;
-    float a;
-    g_currentA = inaCurrentAmps(a) ? a : 0.0f; // okunamayan akım bayat kalmasın
+    // A current that could not be read must not stay stale.
+    float v, a;
+    if (!inaBusVolts(v)) {
+      g_currentA = std::numeric_limits<float>::quiet_NaN();
+      return false;
+    }
+    g_currentA = inaCurrentAmps(a) ? a : std::numeric_limits<float>::quiet_NaN();
     out = v;
     return true;
 #endif
@@ -287,7 +290,7 @@ inline void poll(uint32_t now_ms) {
     if (g_failStreak == FAIL_LIMIT) {
       // Kaynak düştü: arayüz "Veri yok"a dönsün, bir kez duyurulsun.
       g_ema = 0.0f;
-      g_currentA = 0.0f;
+      g_currentA = std::numeric_limits<float>::quiet_NaN();
       probot::robot::state().setBatteryVoltage(now_ms, 0.0f);
       g_lastPubDv = 0;
       if (!g_faultAnnounced) {
@@ -339,10 +342,6 @@ inline void startTask() {
     Serial.println("[BATT ] battery task could not be created (out of memory): no automatic battery readings");
   }
 }
-
-// Anlık akım (A). Yalnız INA kaynağında anlamlı; diğer durumda 0.
-// (+ = bataryadan çekiş; INA'nın VIN+ batarya, VIN- yük yönünde bağlıysa.)
-inline float currentAmps() { return detail::g_currentA; }
 
 #endif // ESP32
 #endif // PROBOT_BATTERY_ENABLED

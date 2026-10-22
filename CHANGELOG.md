@@ -23,6 +23,10 @@ Biçim [Keep a Changelog](https://keepachangelog.com/), sürümler
   also hold on their diagonals, so up+right reads both. Trigger axes are
   analog 0..1 from browser gamepads instead of 0 or 1, with the stick
   deadzone applied.
+- `probot::io::battery::currentAmps()` returns NaN instead of 0 when there
+  is no valid current sample: with a voltage divider
+  (`PROBOT_BATTERY_ADC_PIN`), before the first INA sample and while the
+  INA does not answer. Check it with `isnan()`.
 
 ### Added
 - `probot::framework::install()`: a framework layer runs `boot`,
@@ -110,6 +114,11 @@ Biçim [Keep a Changelog](https://keepachangelog.com/), sürümler
   START). `ds::rslState()` reports whether the robot signal light is lit
   and `ds::commsDisableCount()` how many times a lost Driver Station link
   stopped the robot since boot.
+- `probot::io::battery::currentAmps()` is declared in every configuration
+  and in `<probot/api.hpp>` (it used to exist only with a battery source).
+  `battery::setLowVoltage(volts)` and `battery::isLowVoltage()` give a
+  low-battery flag on the voltage the Driver Station shows (off by
+  default).
 
 ### Changed
 - Dashboard schemas have their own size limit, `PROBOT_DASH_MAX_SCHEMA_BYTES`

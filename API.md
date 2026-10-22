@@ -301,6 +301,17 @@ seçimi ve buton eşlemesi içindir; motor **sürmeyin**: aktüatör için kapı
 `probot::io::gamepad()` / `joystick_api` kullanın. Kapısız veri de bağlantı
 kesilince `PROBOT_INPUT_TIMEOUT_MS` sonra sıfırlanır.
 
+### Batarya okumaları
+
+`probot::io::battery` her yapılandırmada tanımlıdır (`<probot/api.hpp>`
+içinde de):
+
+| Fonksiyon | Ne yapar |
+|---|---|
+| `currentAmps()` | Bataryadan çekilen akım (A; INA'nın VIN+ ucu batarya, VIN- ucu yük tarafında). Akım sensörü yoksa (`PROBOT_BATTERY_INA` tanımlı değil), ilk örnekten önce ya da sensör yanıt vermediyse `NaN` (`isnan()` ile bakın) |
+| `setLowVoltage(volt)` | `isLowVoltage()` eşiği (WPILib `setBrownoutVoltage` gibi, ama yalnız bir bayrak: çıkışlar kapatılmaz). `0` kapatır, varsayılan budur. Negatif, `NaN` ya da 100 V ve üstü için `false` döner, eşik değişmez |
+| `isLowVoltage()` | DS'in gösterdiği pil gerilimi (ölçülen ya da `setBatteryVoltage()` ile verilen) eşiğin altında. Eşik kapalıyken ya da okuma yokken `false`. ADC ya da INA okuması yumuşatılır ve 0,1 V adımlarla değişir, yük altındaki kısa bir çökme görünmeyebilir; `setBatteryVoltage()` ile verilen değer yumuşatılmadan kullanılır |
+
 ### OpMode listesi
 
 Birden çok otonom ya da teleop programı olan kod (ör. bir framework),
@@ -444,7 +455,7 @@ yeniden gönderilir.
 
 `<probot/api.hpp>` WiFi/batarya makrosu istemez; sketch dışındaki `.cpp`
 dosyalarından eklenir. Durum, `probot::ds`, `probot::framework`, telemetri,
-gamepad/joystick tipleri ve sürüm makrolarını içerir. `<probot.h>` bunu da
+gamepad/joystick tipleri, batarya okumaları ve sürüm makrolarını içerir. `<probot.h>` bunu da
 ekler ve runtime'ı (WiFi AP, DS, `setup()`/`loop()`) kurar; yalnız sketch'te
 bir kez eklenir.
 

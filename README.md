@@ -252,7 +252,10 @@ BAT+ ──[100k]──┬──[22k]── GND
 
 If the sensor cannot be reached, a [PB-E306] warning is raised at runtime
 and the gauge returns to "Veri yok". Instantaneous current is also read from
-the INA shunt: `probot::io::battery::currentAmps()`.
+the INA shunt: `probot::io::battery::currentAmps()` (NaN without a current
+sensor). For a low-battery warning, set a threshold with
+`probot::io::battery::setLowVoltage(volts)` and read `isLowVoltage()` (off
+by default).
 
 > **Do not use the INA's I2C bus from user code.** The library reads the INA
 > from its own task loop; if you attach a second device (IMU, OLED...) from
