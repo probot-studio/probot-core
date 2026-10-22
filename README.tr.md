@@ -301,7 +301,7 @@ Kurallar:
   teleopInit/Loop/Stop üçlülerini kullan; iki loop ve iki stop zorunlu.
 - Joystick: auto js = probot::io::joystick_api::makeDefault();
   js.getLeftY() vb. (-1..+1). probot::io::gamepad() üzerinde getLeftX gibi
-  metodlar YOKTUR.
+  metodlar YOKTUR. İkinci kumanda: makeForPort(1) (port 0-5).
 - Servo için ham LEDC kullan: ilgili init'te ledcAttachChannel(pin,50,14,7)
   (yüksek kanal → motor analogWrite'ıyla çakışmaz), teleopLoop'ta ledcWrite.
 - teleopLoop ~50 Hz çağrılır; içinde sonsuz döngü/uzun blocking/delay() yapma.

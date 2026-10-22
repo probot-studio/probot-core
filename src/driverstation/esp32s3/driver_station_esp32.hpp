@@ -110,8 +110,7 @@ namespace probot::driverstation::esp32::diag {
 namespace probot::driverstation::esp32 {
   class DriverStation {
   public:
-    DriverStation(robot::StateService& rs, io::GamepadService& gs)
-    : _rs(rs), _gs(gs), _ws(gs) {}
+    explicit DriverStation(robot::StateService& rs) : _rs(rs) {}
 
     void begin(){
       const char* pw = PROBOT_WIFI_AP_PASSWORD;
@@ -439,7 +438,7 @@ namespace probot::driverstation::esp32 {
     // (telemetry text) frames so the page never polls over HTTP.
 
     size_t buildStateHealthJson(char* out, size_t out_size, const robot::StateSnapshot& s, uint32_t now) {
-      uint32_t joyLast = _gs.lastWriteMs();
+      uint32_t joyLast = io::detail::newestFrameMs();
       long joyAge = -1;
       if (joyLast) {
         int32_t d = (int32_t)(now - joyLast);
@@ -671,8 +670,7 @@ namespace probot::driverstation::esp32 {
     // Zeroes the gamepad so user code reading axes/buttons does not see
     // stale values (last-command runaway when the link dies).
     void onOwnerReleased(uint32_t now_ms) {
-      _gs.write(now_ms, nullptr, 0, nullptr, 0);
-      io::rawGamepad().write(now_ms, nullptr, 0, nullptr, 0);
+      io::detail::neutralizeAll(now_ms, true);
       // Another client may have legitimately taken the slot between the
       // release (inside the mux) and here — don't clobber its count.
       portENTER_CRITICAL(&_owner_mux);
@@ -786,9 +784,7 @@ namespace probot::driverstation::esp32 {
       parseFloatArray(body, "axes", axes, 20, nA);
       parseBoolArray(body, "buttons", buttons, 20, nB);
       uint32_t now = millis();
-      io::rawGamepad().write(now, axes, nA, buttons, nB);
-      if (core::inputsEnabled(ds->_rs.read())) ds->_gs.write(now, axes, nA, buttons, nB);
-      else ds->_gs.write(now, nullptr, 0, nullptr, 0);
+      io::detail::applyFrame(0, now, core::inputsEnabled(ds->_rs.read()), axes, nA, buttons, nB);
       robot::noteDsPacket();
 
       httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
@@ -1031,7 +1027,7 @@ namespace probot::driverstation::esp32 {
 
       auto s = ds->_rs.read();
       uint32_t now = millis();
-      uint32_t joyLast = ds->_gs.lastWriteMs();
+      uint32_t joyLast = io::detail::newestFrameMs();
       long joyAge = -1;
       if (joyLast) {
         int32_t d = (int32_t)(now - joyLast);
@@ -1151,7 +1147,6 @@ namespace probot::driverstation::esp32 {
 
     // ── Members ──
     robot::StateService& _rs;
-    io::GamepadService&  _gs;
     WsJoystick           _ws;
     httpd_handle_t       _server = nullptr;
     TaskHandle_t         _push_task = nullptr;

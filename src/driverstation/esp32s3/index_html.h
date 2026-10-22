@@ -861,6 +861,7 @@ const char MAIN_page[] PROGMEM = R"=====(
               <div class="source" id="srcGamepad">
                 <div class="src-top"><span class="src-name">Gamepad</span><span class="src-state" id="srcGamepadState">Bağlı değil</span></div>
                 <p class="src-desc">USB / Bluetooth kumanda. Bağlayıp herhangi bir tuşa basın — otomatik tanınır ve seçilir.</p>
+                <p class="src-desc" id="srcPorts" style="white-space:pre-line" hidden></p>
               </div>
               <div class="source" id="srcKeyboard">
                 <div class="src-top"><span class="src-name">Klavye</span><span class="src-state" id="srcKeyboardState">Kapalı</span></div>
@@ -2387,13 +2388,20 @@ const char MAIN_page[] PROGMEM = R"=====(
       selectEl.add(option);
     });
     if(selectedGamepadIndex>=0&&!gamepads[selectedGamepadIndex]) selectedGamepadIndex=-1;
-    if(keys.length>0&&selectedGamepadIndex<0) selectedGamepadIndex=parseInt(keys[0],10);
+    /* Yalnız portu olmayan (yeni) kumanda otomatik seçilir: sürücünün
+       kumandası koparsa port 1-5'teki kumanda port 0'a terfi etmez. */
+    var free=keys.filter(function(k){return !padPort[k];});
+    if(free.length>0&&selectedGamepadIndex<0) selectedGamepadIndex=parseInt(free[0],10);
+    assignPorts();
     selectEl.value=String(selectedGamepadIndex);
     renderSourceCards();
   }
   $id('gamepadSelect').addEventListener('change',function(){
     selectedGamepadIndex=parseInt(this.value,10);
     if(isNaN(selectedGamepadIndex)) selectedGamepadIndex=-1;
+    sendNeutralFrame(); // port 0 başka kumandaya geçerken arada nötr
+    assignPorts();
+    renderSourceCards();
   });
   window.addEventListener('gamepadconnected',function(e){
     evlog('info','Gamepad bağlandı: '+e.gamepad.id);
@@ -2401,8 +2409,11 @@ const char MAIN_page[] PROGMEM = R"=====(
   });
   window.addEventListener('gamepaddisconnected',function(e){
     evlog('warn','Gamepad koptu: '+e.gamepad.id);
+    var wasPort0=JSTATE.source==='none'&&e.gamepad.index===selectedGamepadIndex;
     delete gamepads[e.gamepad.index];
-    sendNeutralFrame(); // robot 500 ms failsafe'ini beklemeden nötrle
+    /* robot 500 ms failsafe'ini beklemeden nötrle; boşalan port 1-5'i
+       sendPortInfo nötrler */
+    if(wasPort0) sendNeutralFrame();
   });
   /* Pencere odağı/görünürlüğü gidince basılı tuşlar takılı kalmasın */
   function releaseAllKeys(){
@@ -2424,11 +2435,45 @@ const char MAIN_page[] PROGMEM = R"=====(
               axes:JSTATE.ax,buttons:JSTATE.btn};
     }
     var gp=gamepads[selectedGamepadIndex];
-    if(gp){
-      return {kind:'gamepad',shortName:'Gamepad',id:gp.id,
-              axes:gp.axes,buttons:Array.prototype.map.call(gp.buttons,function(b){return b.pressed;})};
-    }
-    return null;
+    return gp?padSource(gp):null;
+  }
+  function padSource(gp){
+    return {kind:'gamepad',shortName:'Gamepad',id:gp.id,standard:gp.mapping==='standard',
+            axes:gp.axes,buttons:Array.prototype.map.call(gp.buttons,function(b){return b.pressed;}),
+            values:Array.prototype.map.call(gp.buttons,function(b){return Math.round(Math.max(0,Math.min(1,b.value||0))*255);})};
+  }
+  /* Port 0 is the active source (selected gamepad, keyboard or touch).
+     Every other gamepad, and the selected one while keyboard or touch holds
+     port 0, gets the lowest free port 1-5 and keeps it until it is
+     unplugged; ports never shift, so a lost gamepad cannot hand its
+     controls to another one. A vacated port stays empty for PORT_HOLD_MS
+     (past the robot's input timeout); a gamepad whose lowest free port is
+     held waits for it instead of taking a higher one, so a short Bluetooth
+     drop or a dropdown swap ends on the same port. Returns true on change. */
+  var MAX_PORTS=6,PORT_HOLD_MS=600,padPort={},portFreeAt={};   /* index -> port 1-5; port -> time */
+  function assignPorts(){
+    var used={},now=performance.now(),changed=false;
+    var onPort0=JSTATE.source==='none'?selectedGamepadIndex:-1;
+    Object.keys(padPort).forEach(function(k){
+      if(!gamepads[k]||+k===onPort0){
+        portFreeAt[padPort[k]]=now+PORT_HOLD_MS;
+        delete padPort[k];changed=true;
+      }else used[padPort[k]]=true;
+    });
+    Object.keys(gamepads).sort(function(a,b){return a-b;}).forEach(function(k){
+      if(+k===onPort0||padPort[k]) return;
+      for(var p=1;p<MAX_PORTS;p++){
+        if(used[p]) continue;
+        if(now<(portFreeAt[p]||0)) return;   /* wait for the held port */
+        padPort[k]=p;used[p]=true;changed=true;return;
+      }
+    });
+    return changed;
+  }
+  function portSources(src){
+    var list=[src||null,null,null,null,null,null];
+    Object.keys(padPort).forEach(function(k){if(gamepads[k]) list[padPort[k]]=padSource(gamepads[k]);});
+    return list;
   }
 
   function renderSourceCards(){
@@ -2437,7 +2482,12 @@ const char MAIN_page[] PROGMEM = R"=====(
     $id('srcGamepad').classList.toggle('on',!!gp&&st==='none');
     $id('srcKeyboard').classList.toggle('on',st==='keyboard');
     $id('srcTouch').classList.toggle('on',st==='touch');
-    $id('srcGamepadState').textContent=gp?(st==='none'?'Etkin':'Bağlı (beklemede)'):'Bağlı değil';
+    $id('srcGamepadState').textContent=gp?(st==='none'?'Etkin':
+      (padPort[selectedGamepadIndex]?'Bağlı (port '+padPort[selectedGamepadIndex]+')':'Bağlı (beklemede)')):'Bağlı değil';
+    var ports=Object.keys(padPort).filter(function(k){return gamepads[k];})
+      .sort(function(a,b){return padPort[a]-padPort[b];}),sp=$id('srcPorts');
+    sp.hidden=!ports.length;
+    sp.textContent=ports.map(function(k){return 'Port '+padPort[k]+': '+gamepads[k].id;}).join('\n');
     $id('srcKeyboardState').textContent=(st==='keyboard')?'Etkin':'Kapalı';
     $id('srcTouchState').textContent=(st==='touch')?'Etkin':'Kapalı';
     $id('srcKeyboardBtn').textContent=(st==='keyboard')?'Devre dışı bırak':'Etkinleştir';
@@ -2454,6 +2504,7 @@ const char MAIN_page[] PROGMEM = R"=====(
     kbDown={};
     if(st!=='touch') closeDrive();
     sendNeutralFrame(); // kaynak değişiminde robot ANINDA nötr görsün
+    assignPorts();      // seçili kumanda port 0 ile port 1-5 arasında geçer
     renderSourceCards();
     evlog('info','Joystick kaynağı: '+SRC_NAME[st]);
     if(st==='touch') openDrive(); // dokunmatikte varsayılan görünüm sürüş ekranıdır
@@ -2585,18 +2636,24 @@ const char MAIN_page[] PROGMEM = R"=====(
   var lastInputSend=0;
   var INPUT_SEND_INTERVAL=20;
 
-  function packJoystickBinary(axes,buttons){
+  function packJoystickBinary(axes,buttons,port,values){
     /* Protokol tavanı 20/20 — robot daha büyük frame'i reddeder; fazlası
        kırpılır (HOTAS/buton kutusu sessizce kontrolü düşürmesin). */
     var nA=Math.min(axes.length,20);
     var nB=Math.min(buttons.length,20);
+    var nV=values?Math.min(values.length,nB):-1;
     var btnBytes=Math.ceil(nB/8);
-    var buf=new ArrayBuffer(4+nA*2+btnBytes);
+    var base=4+nA*2+btnBytes;
+    var buf=new ArrayBuffer(base+(nV>=0?1+nV:0));
     var view=new DataView(buf);
     view.setUint8(0,0x4A);
     view.setUint8(1,nA);
     view.setUint8(2,nB);
-    view.setUint8(3,0);
+    view.setUint8(3,port||0);
+    if(nV>=0){
+      view.setUint8(base,nV);
+      for(var k=0;k<nV;k++) view.setUint8(base+1+k,values[k]);
+    }
     for(var i=0;i<nA;i++){
       var v=Math.max(-1,Math.min(1,axes[i]));
       view.setInt16(4+i*2,Math.round(v*32767),false);
@@ -2612,11 +2669,12 @@ const char MAIN_page[] PROGMEM = R"=====(
   /* Kaynak kapanınca/değişince bir kez sıfır frame: robotun 500 ms'lik
      PROBOT_INPUT_TIMEOUT_MS failsafe'ini beklemeden komut nötrlenir.
      Throttle/guard atlanır — güvenlik frame'i kuyrukta bekleyemez. */
-  function sendNeutralFrame(){
+  function sendNeutralFrame(port){
     var zero={axes:[0,0,0,0],buttons:[false,false,false,false,false,false,false,false,false,false,false,false]};
     if(wsConnected&&wsJoystick&&wsJoystick.readyState===1){
-      try{wsJoystick.send(packJoystickBinary(zero.axes,zero.buttons));return;}catch(e){}
+      try{wsJoystick.send(packJoystickBinary(zero.axes,zero.buttons,port));return;}catch(e){}
     }
+    if(port) return; /* HTTP fallback carries port 0 only */
     fetch('/updateController',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -2626,15 +2684,22 @@ const char MAIN_page[] PROGMEM = R"=====(
   function sendInput(src){
     var now=performance.now();
     if(inputSending||(now-lastInputSend)<INPUT_SEND_INTERVAL) return;
+    var list=portSources(src);
+    /* nothing connected and no port left to clear */
+    if(!list.some(Boolean)&&!portInfoSig.some(Boolean)) return;
     inputSending=true;
     lastInputSend=now;
     if(wsConnected&&wsJoystick&&wsJoystick.readyState===1){
       try{
-        wsJoystick.send(packJoystickBinary(src.axes,src.buttons));
+        list.forEach(function(s,p){
+          if(s) wsJoystick.send(packJoystickBinary(s.axes,s.buttons,p,s.values));
+        });
+        sendPortInfo(list,now);
         inputSending=false;
         return;
       }catch(e){killWs();scheduleReconnect();}
     }
+    if(!src){inputSending=false;return;} /* HTTP fallback carries port 0 only */
     var ac=new AbortController();
     var tid=setTimeout(function(){ac.abort();},2000);
     fetch('/updateController',{
@@ -2647,12 +2712,42 @@ const char MAIN_page[] PROGMEM = R"=====(
     });
   }
 
+  /* 'N' frame per port: gamepad name (<=63 UTF-8 bytes) and mapping, on
+     change and every 2 s so a reconnected robot learns it again. A port
+     that lost its source gets one neutral frame. */
+  var portInfoSig=[],portInfoAt=0,infoEnc=window.TextEncoder?new TextEncoder():null;
+  function infoName(s){
+    if(s.kind==='keyboard') return 'Keyboard';
+    if(s.kind==='touch') return 'Touch';
+    return s.id||'';
+  }
+  function sendPortInfo(list,now){
+    var sigs=list.map(function(s){return s?infoName(s)+'|'+(s.standard?1:0):'';});
+    var due=now-portInfoAt>2000;
+    for(var p=0;p<MAX_PORTS;p++){
+      if(sigs[p]){
+        if(!due&&sigs[p]===portInfoSig[p]) continue;
+        var name=infoEnc?infoEnc.encode(infoName(list[p])):new Uint8Array(0);
+        var n=Math.min(name.length,63);
+        while(n>0&&n<name.length&&(name[n]&0xC0)===0x80) n--; /* whole UTF-8 characters */
+        var f=new Uint8Array(4+n);
+        f[0]=0x4E;f[1]=p;f[2]=list[p].standard?1:0;f[3]=n;f.set(name.subarray(0,n),4);
+        wsJoystick.send(f.buffer);
+      }else if(portInfoSig[p]){
+        sendNeutralFrame(p);
+      }
+    }
+    portInfoSig=sigs;
+    if(due) portInfoAt=now;
+  }
+
   /* ---- render + gönderim döngüsü ---- */
   var lastLoopT=0;
   function inputLoop(ts){
     var dt=Math.min(0.05,(ts-lastLoopT)/1000||0.016); lastLoopT=ts;
     updateGamepads();
     rebuildGamepadSelect();
+    if(assignPorts()) renderSourceCards(); /* a held port came free */
 
     if(JSTATE.source==='keyboard'){
       var tgt=[0,0,0,0];
@@ -2691,8 +2786,8 @@ const char MAIN_page[] PROGMEM = R"=====(
       for(var i2=0;i2<src.axes.length;i2++) axTxt+=(axTxt?'  ':'')+'Axis '+i2+': '+fmtAx(src.axes[i2]);
       $id('axisData').textContent=axTxt;
       $id('buttonData').textContent=pressed.length?pressed.join('  '):'No buttons pressed';
-      sendInput(src);
     }
+    sendInput(src);   /* ports 1-5 are sent even when port 0 has no source */
 
     // sürüş ekranı üst barı: faz/saat + auto geri sayımı + batarya aynası
     if(!driveOv.hidden){

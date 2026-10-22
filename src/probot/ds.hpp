@@ -108,12 +108,11 @@ namespace probot::ds {
   }
 
   // Ungated controller input in any phase (see io::rawGamepad()). Returns
-  // false when the port does not exist or no frame was ever received.
-  // Only port 0 exists today.
+  // false when the port (0-5) does not exist or no frame was ever received.
   inline bool rawGamepad(int port, io::GamepadSnapshot& out) {
-    if (port != 0) return false;
-    out = io::rawGamepad().read();
-    return out.seq != 0;
+    if (port < 0 || port >= io::kMaxGamepads) return false;
+    out = io::rawGamepad(port).read();
+    return io::rawGamepad(port).hasFrame();
   }
 
 } // namespace probot::ds

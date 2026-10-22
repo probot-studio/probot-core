@@ -15,7 +15,7 @@ namespace probot::driverstation {
 
   inline void start_driver_station(){
   #ifdef ESP32
-    static probot::driverstation::esp32::DriverStation ds(probot::robot::state(), probot::io::gamepad());
+    static probot::driverstation::esp32::DriverStation ds(probot::robot::state());
     detail::g_driver_station = &ds;
     ds.begin();
   #endif

@@ -105,18 +105,42 @@ her seferinde çağırmak normaldir.
 |---|---|---|
 | `getLeftX()`, `getLeftY()` | `float` -1..+1 | Sol çubuk. Y yukarı = pozitif. Deadzone 0.08 |
 | `getRightX()`, `getRightY()` | `float` -1..+1 | Sağ çubuk |
-| `getLeftTriggerAxis()`, `getRightTriggerAxis()` | `float` 0 / 1 | Tetikler (buton olarak okunur) |
+| `getLeftTriggerAxis()`, `getRightTriggerAxis()` | `float` 0..1 | Tetikler. Tarayıcı tetik için analog değer bildiriyorsa analog (çoğu kumanda), dijital tetikte, klavye/dokunmatikte ve HTTP yedeğinde 0 / 1. Deadzone tetiklere de uygulanır |
 | `getA()`, `getB()`, `getX()`, `getY()` | `bool` | Xbox isimleri |
 | `getCross()`, `getCircle()`, `getSquare()`, `getTriangle()` | `bool` | PlayStation eşdeğerleri |
 | `getLB()`, `getRB()` | `bool` | Omuz butonları |
 | `getBack()`, `getStart()`, `getOptions()` | `bool` | Orta butonlar (`getOptions` yalnız `tuna-default` eşlemesinde tanımlı) |
 | `getLeftStickButton()`, `getRightStickButton()` | `bool` | Çubuğa basma (L3/R3) |
-| `getPOV()` | `int` | D-Pad: -1 yok, 0 yukarı, 90 sağ, 180 aşağı, 270 sol |
-| `getDpadUp()/Right()/Down()/Left()` | `bool` | D-Pad tek yön |
+| `getPOV()` | `int` | D-Pad: -1 yok, 0 yukarı, 90 sağ, 180 aşağı, 270 sol. D-Pad'i butondan okuyan eşlemelerde (`logitech-f310`, `standard`) çaprazlar da (45, 135, 225, 315) ve zıt yönler birbirini siler; `axis9-dpad` ve `tuna-default` eksen 9'dan 4 yön okur |
+| `getDpadUp()/Right()/Down()/Left()` | `bool` | D-Pad yönü; çaprazda iki yön birden `true` (yukarı+sağ: `getDpadUp()` ve `getDpadRight()`) |
 | `getRawAxis(i)`, `getRawButton(i)` | `float` / `bool` | Ham erişim (mapping'siz) |
+| `getRawButtonValue(i)` | `float` 0..1 | Butonun analog değeri; DS analog değer yollamadıysa basılıysa 1, değilse 0 |
+| `getName(buf, cap)` | `bool` | Tarayıcının verdiği kumanda adı (en çok 63 bayt, UTF-8). Kumanda bağlı değilse `false` ve boş metin |
+| `isStandardMapping()` | `bool` | Tarayıcı W3C standart düzeni bildiriyor (`"standard"` eşlemesinin varsaydığı sıra) |
 | `isConnected()` | `bool` | En az bir eksen/buton verisi geldi mi |
 | `getSeq()`, `getMs()` | `uint32_t` | Paket sayacı / son paket zamanı |
 | `getAxisCount()`, `getButtonCount()` | `uint32_t` | Kumandanın bildirdiği sayılar |
+
+**Birden çok kumanda:** DS altı porta kadar kumanda yollar. Port 0
+Joystick sekmesinde seçili kaynaktır (kumanda, klavye ya da dokunmatik).
+Bağlı diğer tarayıcı kumandaları boş olan en küçük port 1-5'i alır ve
+çıkarılana kadar o portta kalır. Klavye ya da dokunmatik port 0'dayken
+seçili kumanda da bir port 1-5 alır: sürücü klavyede, operatör kumandada
+çalışabilir. Joystick sekmesindeki kumanda kartı port listesini gösterir.
+
+```cpp
+auto driver = probot::io::joystick_api::makeDefault();       // port 0
+auto op     = probot::io::joystick_api::makeForPort(1);      // port 1
+```
+
+Bir kumanda çıkarsa portu hemen nötr okunur ve boş kalır; diğer kumandalar
+port değiştirmez. Boşalan port 600 ms başka kumandaya verilmez; port
+bekleyen kumanda daha büyük bir porta geçmez, bu süre bitince o portu alır
+(kısa bir Bluetooth kopması ya da Joystick sekmesinde seçim değişikliği
+kumandayı aynı porta döndürür). Port 0'daki kumanda koparsa port 1-5'teki
+bir kumanda port 0'a geçmez: port 0 yeni takılan kumandaya ya da Joystick
+sekmesindeki seçime kadar boştur. Her port aynı failsafe ve aynı eşlemeyi (mapping)
+kullanır.
 
 **Failsafe:** joystick verisi 500 ms kesilirse tüm eksen/butonlar
 sıfır okunur. Ayrıca bağlantı koptuğunda state anında sıfırlanır.
@@ -235,10 +259,11 @@ hook'u tamamlanmış evre için daima `phase` kullanılmalıdır.
 | `ds::isEStopped()` | Acil durdurma kilitli (reboot'a kadar) |
 | `ds::isAttached()` | Robotu sahiplenmiş bir DS istemcisi var |
 | `ds::matchTimeSeconds()` | Otonom süresinden kalan saniye (AUTO_RUN'da); zamanlı dönem yoksa `-1` |
-| `ds::packetSeq()` | Her DS joystick paketinde ve kabul edilen mod/OpMode/INIT/START/STOP komutunda artar (acil durdurma ve reboot isteğinde artmaz) |
-| `ds::rawGamepad(port, out)` | Kapısız son joystick karesi, her fazda (yalnız `port` 0). Kare yoksa `false` |
+| `ds::packetSeq()` | Tek sayaç: her portun her DS joystick (`'J'`) paketinde (iki kumandayla her gönderimde iki kez) ve kabul edilen mod/OpMode/INIT/START/STOP komutunda artar (acil durdurma ve reboot isteğinde artmaz) |
+| `ds::rawGamepad(port, out)` | Kapısız son joystick karesi, her fazda (`port` 0-5). Port yoksa ya da kare yoksa `false` |
 
-`probot::io::rawGamepad()` aynı kapısız kaynağın servisidir. Menü, otonom
+`probot::io::rawGamepad(port)` aynı kapısız kaynağın servisidir (`port`
+verilmezse 0). Menü, otonom
 seçimi ve buton eşlemesi içindir; motor **sürmeyin**: aktüatör için kapılı
 `probot::io::gamepad()` / `joystick_api` kullanın. Kapısız veri de bağlantı
 kesilince `PROBOT_INPUT_TIMEOUT_MS` sonra sıfırlanır.
@@ -488,7 +513,7 @@ yazacaksanız:
 |---|---|---|---|
 | `/` | GET | gerekli | Driver Station arayüzü (SPA) |
 | `/joystick` | WS | gerekli | Çift yönlü binary kanal (çerçeve formatları aşağıda) |
-| `/updateController` | POST | gerekli | JSON fallback: `{"axes":[...],"buttons":[...]}` — WS koptuğunda |
+| `/updateController` | POST | gerekli | JSON fallback: `{"axes":[...],"buttons":[...]}`, WS koptuğunda (yalnız port 0) |
 | `/robotControl?cmd=mode&val=auto\|teleop\|utility` | GET | gerekli | STOPPED/TRANSITION'da modu (ve o modun tercih edilen OpMode seçeneğini) seçer; INIT/RUN'da 409. `utility` yalnız `util` true iken |
 | `/robotControl?cmd=opmode&id=N` | GET | gerekli | Listelenmiş bir OpMode seçeneğini (ve modunu) seçer; `id` ondalık metin. Listede yoksa 400, INIT/RUN'da 409 |
 | `/opmodes` | GET | gerekli | `{"options":[{"id":"101","mode":"auto","name":"Sol","group":"Otonom","description":"..."}]}`. `id` 64 bitlik olabildiği için metindir. Liste hiç verilmediyse `{"options":[]}`. Liste değişince `omv` artar; yanıt sırasında değişirse bağlantı kapanır, yeniden isteyin |
@@ -523,9 +548,16 @@ Sahip düştüğünde gamepad verisi anında sıfırlanır.
 'J' 0x4A  joystick verisi:
   [1]      uint8   eksen sayısı   (maks 20)
   [2]      uint8   buton sayısı   (maks 20)
-  [3]      uint8   rezerve (0)
+  [3]      uint8   port (0-5; eski sayfalar 0 yollar)
   [4..]    int16   eksenler, big-endian, değer = float × 32767
   [sonra]  uint8[] butonlar, bit-paketli, LSB önce
+  [sonra]  isteğe bağlı: uint8 değer sayısı (≤ buton sayısı), sonra o
+           kadar uint8 analog buton değeri (0-255, buton sırasıyla)
+'N' 0x4E  kumanda bilgisi: port atanınca/değişince ve 2 sn'de bir:
+  [1]      uint8   port (0-5)
+  [2]      uint8   bayraklar, bit 0 = W3C standart düzen
+  [3]      uint8   ad uzunluğu (maks 63)
+  [4..]    ad, UTF-8. Robot adı yalnız o porta kare geldikçe raporlar
 'P' 0x50  boşta keepalive (tek bayt) — gamepad yokken 2 sn'de bir;
           owner slotunu ve DS aktivitesini canlı tutar
 'W' 0x57  dashboard yazma: [1..2] u16 topic id (LE), [3] u8 değer tipi,
@@ -536,11 +568,14 @@ Sahip düştüğünde gamepad verisi anında sıfırlanır.
           bir id gördüğünde yollar
 ```
 
-`'J'`/`'P'` en çok 47 bayttır; yalnız `'W'` bundan uzun olabilir: en çok
-47 ile 4 + `dashMax` (`'S'` çerçevesinde) arasından büyük olanı kadar. Bu
+`'J'`/`'N'`/`'P'` en çok 68 bayttır; yalnız `'W'` bundan uzun olabilir: en
+çok 68 ile 4 + `dashMax` (`'S'` çerçevesinde) arasından büyük olanı kadar. Bu
 sınırı aşan çerçeve bağlantıyı kapatır; sınır içinde kalıp değeri `dashMax`
 bayttan uzun olan `'W'` `'K'` 4 ile reddedilir. Robot açılışta büyük çerçeve
-tamponunu ayıramadıysa 47 bayttan uzun her çerçeve bağlantıyı kapatır.
+tamponunu ayıramadıysa 68 bayttan uzun her çerçeve bağlantıyı kapatır.
+Kuralsız `'J'`/`'N'` (port 5'ten büyük, sayı sınırı aşılmış, uzunluk
+tutmuyor, butonlardan sonra değer bloğu olmayan fazladan bayt) sessizce
+atılır.
 
 Robot → istemci (push):
 

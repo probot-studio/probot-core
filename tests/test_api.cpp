@@ -2,6 +2,7 @@
 
 // Compiles with no PROBOT_WIFI_* or battery macros: api.hpp is config-free.
 #include <probot/api.hpp>
+#include "gamepad_test_util.hpp"
 
 extern unsigned long _test_millis_now;
 
@@ -117,13 +118,14 @@ TEST_CASE(ds_attached_and_packet_seq){
 }
 
 TEST_CASE(ds_raw_gamepad_is_ungated_and_reports_missing_frames){
+  resetGamepadsForTest();
   probot::io::GamepadSnapshot out{};
   EXPECT_TRUE(!probot::ds::rawGamepad(1, out));
 
   float axes[2] = { 0.5f, -0.25f };
   bool buttons[1] = { true };
   _test_millis_now = 10;
-  probot::io::rawGamepad().write(10u, axes, 2, buttons, 1);
+  probot::io::detail::applyFrame(0, 10u, false, axes, 2, buttons, 1);
   // Raw input is readable while STOPPED, unlike the gated gamepad.
   EXPECT_TRUE(probot::ds::rawGamepad(0, out));
   EXPECT_NEAR(out.axes[0], 0.5f, 1e-6f);

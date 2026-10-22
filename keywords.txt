@@ -70,6 +70,10 @@ getDpadLeft	KEYWORD2
 getDpadRight	KEYWORD2
 getRawAxis	KEYWORD2
 getRawButton	KEYWORD2
+getRawButtonValue	KEYWORD2
+getName	KEYWORD2
+isStandardMapping	KEYWORD2
+makeForPort	KEYWORD2
 isConnected	KEYWORD2
 rawGamepad	KEYWORD2
 outputsEnabled	KEYWORD2
