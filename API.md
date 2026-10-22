@@ -290,6 +290,8 @@ hook'u tamamlanmış evre için daima `phase` kullanılmalıdır.
 | `ds::isAttached()` | Robotu sahiplenmiş bir DS istemcisi var |
 | `ds::matchTimeSeconds()` | Otonom süresinden kalan saniye (AUTO_RUN'da); zamanlı dönem yoksa `-1` |
 | `ds::packetSeq()` | Tek sayaç: her portun her DS joystick (`'J'`) paketinde (iki kumandayla her gönderimde iki kez) ve kabul edilen mod/OpMode/INIT/START/STOP komutunda artar (acil durdurma ve reboot isteğinde artmaz) |
+| `ds::rslState()` | Robot sinyal ışığı (RSL) şu an yanık mı: robot hareket edebilen RUN fazında yanıp söner, diğer durumlarda sürekli yanar. `PROBOT_RSL_PIN` bağlı olmasa da izlenir; çalışma zamanı başlamadan `false` |
+| `ds::commsDisableCount()` | Açılıştan beri DS bağlantısı koptuğu için etkin (START verilmiş) robotun kaç kez durdurulduğu (PB-E303). INIT sırasındaki kopma ve `PROBOT_DS_TIMEOUT_FORCE_STOP 0` iken kopma (PB-E304, yalnız joystick sıfırlanır) sayılmaz |
 | `ds::rawGamepad(port, out)` | Kapısız son joystick karesi, her fazda (`port` 0-5). Port yoksa ya da kare yoksa `false` |
 | `ds::systemTimeValid()` | Sistem saati (`time()`, `gettimeofday()`) gerçek zamanı tutuyor mu. Robotta pil destekli saat yok: DS sayfası bağlanınca tarayıcının saatini gönderir. İlk geçerli saat her zaman kurulur, sonrakiler yalnız robot durmuşken (STOPPED; otonom ile TeleOp arası sayılmaz), böylece maç sırasında saat atlamaz. O zamana dek `false`: güç verilince `time()` 1970'ten sayar; yazılımla yeniden başlatmada (DS'ten reboot, PB-E305, panic/watchdog) eski gerçek zamandan devam edebilir ama yine geçerli sayılmaz. Dosya adı ya da kayıt zamanı yazmadan önce bakın. Saat UTC'dir; yerel saat için sketch `setenv("TZ", "<+03>-3", 1); tzset();` çağırır |
 
@@ -298,6 +300,17 @@ verilmezse 0). Menü, otonom
 seçimi ve buton eşlemesi içindir; motor **sürmeyin**: aktüatör için kapılı
 `probot::io::gamepad()` / `joystick_api` kullanın. Kapısız veri de bağlantı
 kesilince `PROBOT_INPUT_TIMEOUT_MS` sonra sıfırlanır.
+
+### Batarya okumaları
+
+`probot::io::battery` her yapılandırmada tanımlıdır (`<probot/api.hpp>`
+içinde de):
+
+| Fonksiyon | Ne yapar |
+|---|---|
+| `currentAmps()` | Bataryadan çekilen akım (A; INA'nın VIN+ ucu batarya, VIN- ucu yük tarafında). Akım sensörü yoksa (`PROBOT_BATTERY_INA` tanımlı değil), ilk örnekten önce ya da sensör yanıt vermediyse `NaN` (`isnan()` ile bakın) |
+| `setLowVoltage(volt)` | `isLowVoltage()` eşiği (WPILib `setBrownoutVoltage` gibi, ama yalnız bir bayrak: çıkışlar kapatılmaz). `0` kapatır, varsayılan budur. Negatif, `NaN` ya da 100 V ve üstü için `false` döner, eşik değişmez |
+| `isLowVoltage()` | DS'in gösterdiği pil gerilimi (ölçülen ya da `setBatteryVoltage()` ile verilen) eşiğin altında. Eşik kapalıyken ya da okuma yokken `false`. ADC ya da INA okuması yumuşatılır ve 0,1 V adımlarla değişir, yük altındaki kısa bir çökme görünmeyebilir; `setBatteryVoltage()` ile verilen değer yumuşatılmadan kullanılır |
 
 ### OpMode listesi
 
@@ -442,7 +455,7 @@ yeniden gönderilir.
 
 `<probot/api.hpp>` WiFi/batarya makrosu istemez; sketch dışındaki `.cpp`
 dosyalarından eklenir. Durum, `probot::ds`, `probot::framework`, telemetri,
-gamepad/joystick tipleri ve sürüm makrolarını içerir. `<probot.h>` bunu da
+gamepad/joystick tipleri, batarya okumaları ve sürüm makrolarını içerir. `<probot.h>` bunu da
 ekler ve runtime'ı (WiFi AP, DS, `setup()`/`loop()`) kurar; yalnız sketch'te
 bir kez eklenir.
 
@@ -538,6 +551,18 @@ probot::emergencyStop();   // her task'tan güvenli, kullanıcı hook'u dahil
 Sadece bir bayrak set eder; gerçek sırayı (task kill → watchdog'lu aktif
 `stop()` → kilit) sysloop yürütür — bu yüzden çağıran task kendini
 silmez. Arayüzdeki EMERGENCY STOP butonuyla aynı yola çıkar.
+
+Acil durdurma değil, normal durdurma (DS'teki STOP gibi) için:
+
+```cpp
+probot::requestStop();     // her task'tan güvenli; durdurulacak bir şey yoksa false
+```
+
+Çalışan hook bölünmez: döner, en fazla bir loop turu daha çalışabilir,
+sonra aktif modun `stop()`u çalışır, robot STOPPED'a geçer ve DS yeniden
+INIT edebilir (DS'teki STOP ile aynı). Kabul edilmiş ama henüz başlamamış
+bir INIT/START'ı da iptal eder. Durdurma zaten sürüyorsa ya da acil
+durdurma kilitliyse `false` döner.
 
 ## HTTP / WebSocket arayüzü
 

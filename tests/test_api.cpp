@@ -4,6 +4,9 @@
 #include <probot/api.hpp>
 #include "gamepad_test_util.hpp"
 
+#include <cmath>
+#include <limits>
+
 extern unsigned long _test_millis_now;
 
 #if !defined(PROBOT_VERSION_MAJOR) || !defined(PROBOT_VERSION_MINOR) || !defined(PROBOT_VERSION_PATCH)
@@ -132,4 +135,112 @@ TEST_CASE(ds_raw_gamepad_is_ungated_and_reports_missing_frames){
   EXPECT_TRUE(out.buttons[0]);
   EXPECT_TRUE(!probot::ds::rawGamepad(1, out));
   _test_millis_now = 0;
+}
+
+TEST_CASE(request_stop_is_a_cooperative_stop_from_code){
+  using namespace probot::robot;
+  resetDs();
+  auto& s = state();
+  uint32_t seq = s.read().seq;
+  EXPECT_TRUE(!probot::requestStop());                 // idle: nothing to stop
+  EXPECT_TRUE(s.read().seq == seq);                    // and nothing published
+
+  s.setControl(1u, Status::START, OpMode::TELEOP);
+  s.setPhase(1u, Phase::TELEOP_RUN);
+  EXPECT_TRUE(probot::requestStop());
+  EXPECT_TRUE(s.status() == Status::STOP);
+  EXPECT_TRUE(s.phase() == Phase::TELEOP_RUN);         // the user task publishes the phase
+  EXPECT_TRUE(!probot::ds::outputsEnabled());
+
+  // An accepted INIT not yet published as a phase is cancelled too.
+  resetDs();
+  s.setStatus(2u, Status::INIT);
+  EXPECT_TRUE(probot::requestStop());
+  EXPECT_TRUE(s.status() == Status::STOP);
+
+  // A stop in progress (status STOP, phase still active) is not a new one,
+  // nor is the window after autonomous expiry.
+  s.setPhase(3u, Phase::TELEOP_RUN);
+  EXPECT_TRUE(!probot::requestStop());
+  s.setPhase(3u, Phase::TRANSITION);
+  EXPECT_TRUE(!probot::requestStop());
+
+  // After the emergency stop latches there is nothing left to stop.
+  s.setControl(3u, Status::START, OpMode::AUTO);
+  s.setPhase(3u, Phase::AUTO_RUN);
+  g_estop_latched = 1;
+  EXPECT_TRUE(!probot::requestStop());
+  EXPECT_TRUE(s.status() == Status::START);
+  resetDs();
+}
+
+namespace {
+  int g_rsLoops = 0, g_rsStops = 0;
+  void rsLoop(){ if (++g_rsLoops == 2) EXPECT_TRUE(probot::requestStop()); }
+  void rsStop(){ ++g_rsStops; }
+}
+
+// The contract the docs promise: a stop requested from a hook never
+// interrupts it, runs the stop hook once and leaves the robot idle.
+TEST_CASE(request_stop_from_a_loop_hook_ends_the_run_cooperatively){
+  using namespace probot::robot;
+  namespace core = probot::core;
+  resetDs();
+  g_rsLoops = g_rsStops = 0;
+  auto& rs = state();
+  core::Hooks h{};
+  h.teleopLoop = rsLoop;
+  h.teleopStop = rsStop;
+  core::PhaseMachine m;
+  core::Supervisor sup;
+  rs.setControl(1u, Status::INIT, OpMode::TELEOP);
+  for (uint32_t t = 10; t < 30; t += 10) m.step(h, sup.update(rs, t, false), rs, t);
+  rs.setStatus(30u, Status::START);
+  for (uint32_t t = 30; t < 100; t += 10) m.step(h, sup.update(rs, t, false), rs, t);
+  EXPECT_TRUE(g_rsLoops == 2);
+  EXPECT_TRUE(g_rsStops == 1);
+  EXPECT_TRUE(rs.phase() == Phase::STOPPED);
+  EXPECT_TRUE(core::canAcceptInit(rs.phase(), rs.status()));
+  EXPECT_TRUE(!probot::requestStop());
+  resetDs();
+}
+
+TEST_CASE(ds_rsl_state_and_comms_disable_count_read_the_runtime_counters){
+  using namespace probot::robot;
+  g_rsl_on = 0;
+  g_comms_disable_count = 0;
+  EXPECT_TRUE(!probot::ds::rslState());
+  EXPECT_TRUE(probot::ds::commsDisableCount() == 0u);
+  g_rsl_on = 1;
+  g_comms_disable_count = 3;
+  EXPECT_TRUE(probot::ds::rslState());
+  EXPECT_TRUE(probot::ds::commsDisableCount() == 3u);
+  g_rsl_on = 0;
+  g_comms_disable_count = 0;
+}
+
+TEST_CASE(battery_current_is_declared_without_battery_macros_and_nan_without_sensor){
+  // This file defines no battery source.
+  EXPECT_TRUE(std::isnan(probot::io::battery::currentAmps()));
+}
+
+TEST_CASE(battery_low_voltage_flag_follows_the_threshold){
+  namespace battery = probot::io::battery;
+  using namespace probot::robot;
+  state().setBatteryVoltage(1u, 11.0f);
+  EXPECT_TRUE(!battery::isLowVoltage());                // off by default
+  EXPECT_TRUE(battery::setLowVoltage(11.5f));
+  EXPECT_TRUE(battery::isLowVoltage());
+  state().setBatteryVoltage(2u, 12.0f);
+  EXPECT_TRUE(!battery::isLowVoltage());
+  state().setBatteryVoltage(3u, 0.0f);                  // no reading is not low
+  EXPECT_TRUE(!battery::isLowVoltage());
+  EXPECT_TRUE(!battery::setLowVoltage(-1.0f));
+  EXPECT_TRUE(!battery::setLowVoltage(std::numeric_limits<float>::quiet_NaN()));
+  EXPECT_TRUE(!battery::setLowVoltage(100.0f));
+  state().setBatteryVoltage(4u, 11.0f);
+  EXPECT_TRUE(battery::isLowVoltage());                 // refused values keep the threshold
+  EXPECT_TRUE(battery::setLowVoltage(0.0f));
+  EXPECT_TRUE(!battery::isLowVoltage());
+  state().setBatteryVoltage(5u, 0.0f);
 }

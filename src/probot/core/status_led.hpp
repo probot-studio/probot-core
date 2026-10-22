@@ -40,5 +40,10 @@ namespace probot::core {
   inline bool rslBlinking(robot::Phase phase, bool estop) {
     return !estop && isRunPhase(phase);
   }
+  // Whether the robot signal light is lit: the blink half while it blinks,
+  // otherwise solid on.
+  inline bool rslLit(robot::Phase phase, bool estop, bool blinkOn) {
+    return rslBlinking(phase, estop) ? blinkOn : true;
+  }
 
 } // namespace probot::core

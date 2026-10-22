@@ -124,6 +124,11 @@ namespace probot::core {
   inline bool canAcceptStop(robot::Phase phase, robot::Status status) {
     return isActivePhase(phase) || status != robot::Status::STOP;
   }
+  // probot::requestStop(): like STOP, but a stop already in progress
+  // (status STOP while the phase catches up) is not a new one.
+  inline bool canRequestStop(robot::Phase, robot::Status status) {
+    return status != robot::Status::STOP;
+  }
 
   // Input gate shared by the WebSocket and HTTP joystick paths: controller
   // input reaches user code only in a started RUN phase that is not stalled.
@@ -306,6 +311,15 @@ namespace probot::core {
                         uint32_t deadline_ms) {
     return isActivePhase(phase) && heartbeat_ms != 0 &&
            (int32_t)(now - heartbeat_ms) > (int32_t)deadline_ms;
+  }
+
+  // The Driver Station link counts as lost when a DS was active (last
+  // activity != 0), the robot is not stopped, and nothing arrived for
+  // longer than timeout_ms.
+  inline bool dsLinkLost(robot::Status status, uint32_t now, uint32_t lastActivity_ms,
+                         uint32_t timeout_ms) {
+    return lastActivity_ms != 0 && status != robot::Status::STOP &&
+           (int32_t)(now - lastActivity_ms) > (int32_t)timeout_ms;
   }
 
 } // namespace probot::core

@@ -45,10 +45,7 @@ namespace probot::robot {
     // INIT latches the selected option: the run keeps reporting it even
     // after autonomous expiry preselects the TeleOp choice.
     void setStatus(uint32_t now_ms, Status st){
-      writeField(now_ms, [&](StateSnapshot& w){
-        w.status = st;
-        if (st == Status::INIT) w.activeOpModeId = w.opModeId;
-      });
+      writeField(now_ms, [&](StateSnapshot& w){ applyStatus(w, st); });
     }
     void setPhase(uint32_t now_ms, Phase ph){ writeField(now_ms, [&](StateSnapshot& w){ w.phase = ph; }); }
     void setSelectedMode(uint32_t now_ms, OpMode mode){ writeField(now_ms, [&](StateSnapshot& w){ w.selectedMode = mode; }); }
@@ -81,6 +78,17 @@ namespace probot::robot {
       writeLocked(now_ms, [&](StateSnapshot& w){ w.selectedMode = mode; w.opModeId = opModeId; });
       return true;
     }
+    // setStatus() only if accept(phase, status) holds (a core::canAccept*
+    // rule), checked and written in one critical section, so commands from
+    // different tasks cannot overwrite each other. accept runs inside the
+    // critical section: it must be a pure predicate.
+    bool setStatusIf(uint32_t now_ms, Status st, bool (*accept)(Phase, Status)){
+      probot::core::MuxGuard guard(_mux);
+      const StateSnapshot& c = _buf[_cur];
+      if (!accept(c.phase, c.status)) return false;
+      writeLocked(now_ms, [&](StateSnapshot& w){ applyStatus(w, st); });
+      return true;
+    }
     void setBatteryVoltage(uint32_t now_ms, float v){ writeField(now_ms, [&](StateSnapshot& w){ w.batteryVoltage = v; }); }
     void setAutoPeriodSeconds(uint32_t now_ms, int32_t s){ writeField(now_ms, [&](StateSnapshot& w){ w.autoPeriodSeconds = s; }); }
     void setAutoStartMs(uint32_t now_ms, uint32_t ms){ writeField(now_ms, [&](StateSnapshot& w){ w.autoStartMs = ms; }); }
@@ -105,6 +113,10 @@ namespace probot::robot {
     uint64_t activeOpModeId() const    { return read().activeOpModeId; }
 
   private:
+    static void applyStatus(StateSnapshot& w, Status st){
+      w.status = st;
+      if (st == Status::INIT) w.activeOpModeId = w.opModeId;
+    }
     bool idleLocked() const {
       const StateSnapshot& c = _buf[_cur];
       return (c.phase == Phase::STOPPED || c.phase == Phase::TRANSITION) && c.status == Status::STOP;
@@ -162,6 +174,12 @@ namespace probot::robot {
   inline volatile uint32_t g_estop_latched   = 0;
   // Deliberate software reboot request (the "reboot to clear estop" button).
   inline volatile uint32_t g_reboot_requested = 0;
+
+  // Robot signal light level the sysloop last drew (1 = lit), whether or not
+  // PROBOT_RSL_PIN is wired.
+  inline volatile uint32_t g_rsl_on = 0;
+  // Times the DS timeout stopped an enabled (START) robot since boot.
+  inline volatile uint32_t g_comms_disable_count = 0;
 }
 
 namespace probot {

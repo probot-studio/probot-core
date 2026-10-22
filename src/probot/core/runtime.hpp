@@ -266,9 +266,11 @@ namespace probot {
       core::Rgb c = core::statusColor(s, estop, on);
       builtinled::render(c.r, c.g, c.b); // single caller (sysloop): paints status
 
-#if PROBOT_RSL_PIN >= 0
       // Robot signal light: blink while the robot can move, else solid on.
-      digitalWrite(PROBOT_RSL_PIN, core::rslBlinking(s.phase, estop) ? (on ? HIGH : LOW) : HIGH);
+      bool rsl = core::rslLit(s.phase, estop, on);
+      __atomic_store_n(&probot::robot::g_rsl_on, rsl ? 1u : 0u, __ATOMIC_SEQ_CST);
+#if PROBOT_RSL_PIN >= 0
+      digitalWrite(PROBOT_RSL_PIN, rsl ? HIGH : LOW);
 #endif
     }
 
@@ -336,12 +338,13 @@ namespace probot {
         // DS connection heartbeat: no activity → stop and/or disconnect.
         if (!estop){
           uint32_t dsAct = __atomic_load_n(&probot::robot::g_ds_last_activity_ms, __ATOMIC_SEQ_CST);
-          if (dsAct != 0 && probot::robot::state().status() != Status::STOP &&
-              (int32_t)(now - dsAct) > (int32_t)PROBOT_DS_TIMEOUT_MS){
+          Status st = probot::robot::state().status();
+          if (core::dsLinkLost(st, now, dsAct, PROBOT_DS_TIMEOUT_MS)){
             Serial.printf("[SYS  ] DS timeout: no activity for %lu ms\n", (unsigned long)(now - dsAct));
 #if PROBOT_DS_TIMEOUT_FORCE_STOP
             probot::telemetry::println("!! [PB-E303] DS CONNECTION LOST — stopping robot — docs/hatalar#pb-e303");
             probot::robot::state().setStatus(now, Status::STOP);
+            if (st == Status::START) __atomic_add_fetch(&probot::robot::g_comms_disable_count, 1u, __ATOMIC_SEQ_CST);
 #else
             probot::telemetry::println("!! [PB-E304] DS CONNECTION LOST — joystick neutral, waiting reconnect — docs/hatalar#pb-e304");
 #endif
@@ -383,6 +386,7 @@ namespace probot {
     pinMode(PROBOT_RSL_PIN, OUTPUT);
     digitalWrite(PROBOT_RSL_PIN, HIGH);            // solid on until moving
 #endif
+    __atomic_store_n(&probot::robot::g_rsl_on, 1u, __ATOMIC_SEQ_CST);
 
     wdt_init_no_idle(PROBOT_WDT_TIMEOUT_S, true);
     detail::g_framework = framework::seal();

@@ -47,6 +47,9 @@ Rules that generated code MUST follow:
   shown on the Logs page. Do not write to the console every loop.
 - Extra .cpp files include `<probot/api.hpp>` (config-free), never
   `<probot.h>`, which belongs to the sketch only.
+- To stop the running OpMode from code (for example on a fatal error),
+  call `probot::requestStop()`: the same cooperative stop as the Driver
+  Station STOP button. `probot::emergencyStop()` is terminal until reboot.
 - Inputs auto-zero 500 ms after the link drops — driving motors directly
   from axis values is safe.
 - Battery gauge in the UI: EITHER a voltage divider on an ADC1 pin
@@ -54,7 +57,9 @@ Rules that generated code MUST follow:
   WiFi on — plus `PROBOT_BATTERY_R_TOP_K`/`_R_BOT_K` in kΩ), OR an I2C
   sensor (`PROBOT_BATTERY_INA 219` or `226`), never both. Without either,
   feed it manually with `probot::setBatteryVoltage(v)` or the UI shows
-  "Veri yok". INA current: `probot::io::battery::currentAmps()`.
+  "Veri yok". INA current: `probot::io::battery::currentAmps()` (NaN
+  without an INA sensor). Low battery: `probot::io::battery::setLowVoltage(v)`
+  sets the threshold (off by default), `isLowVoltage()` reads the flag.
 
 ## Docs
 

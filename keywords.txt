@@ -82,6 +82,12 @@ isAttached	KEYWORD2
 matchTimeSeconds	KEYWORD2
 packetSeq	KEYWORD2
 systemTimeValid	KEYWORD2
+rslState	KEYWORD2
+commsDisableCount	KEYWORD2
+requestStop	KEYWORD2
+currentAmps	KEYWORD2
+setLowVoltage	KEYWORD2
+isLowVoltage	KEYWORD2
 attach	KEYWORD2
 detach	KEYWORD2
 write	KEYWORD2

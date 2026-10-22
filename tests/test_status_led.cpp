@@ -43,6 +43,14 @@ TEST_CASE(rsl_blinks_only_in_run_phases){
   EXPECT_TRUE(!core::rslBlinking(robot::Phase::STOPPED, false));
 }
 
+TEST_CASE(rsl_is_lit_solid_unless_blinking){
+  EXPECT_TRUE(core::rslLit(robot::Phase::TELEOP_RUN, false, true));
+  EXPECT_TRUE(!core::rslLit(robot::Phase::TELEOP_RUN, false, false));
+  EXPECT_TRUE(core::rslLit(robot::Phase::STOPPED, false, false));
+  EXPECT_TRUE(core::rslLit(robot::Phase::TELEOP_INIT, false, false));
+  EXPECT_TRUE(core::rslLit(robot::Phase::AUTO_RUN, true, false));    // e-stop: solid
+}
+
 TEST_CASE(active_phase_and_mode_classification){
   EXPECT_TRUE(core::isActivePhase(robot::Phase::AUTO_INIT));
   EXPECT_TRUE(core::isActivePhase(robot::Phase::TELEOP_RUN));

@@ -210,7 +210,9 @@ BAT+ ──[100k]──┬──[22k]── GND
 
 Sensöre ulaşılamazsa çalışma zamanında [PB-E306] uyarısı düşer ve gösterge
 "Veri yok"a döner. INA'nın shunt'ı üzerinden anlık akım da okunur:
-`probot::io::battery::currentAmps()`.
+`probot::io::battery::currentAmps()` (akım sensörü yoksa `NaN`). Düşük pil
+uyarısı için `probot::io::battery::setLowVoltage(volt)` eşiği verip
+`isLowVoltage()` okunur (varsayılan kapalı).
 
 > **INA'nın I2C bus'ını kullanıcı kodundan kullanmayın.** Kütüphane INA'yı
 > kendi görev döngüsünden okur; aynı `Wire` bus'ına robot kodunuzdan ikinci

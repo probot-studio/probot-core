@@ -13,6 +13,7 @@
 #include <probot/core/loop_timing.hpp>
 #include <probot/io/gamepad.hpp>
 #include <probot/io/joystick_api.hpp>
+#include <probot/io/battery_status.hpp>
 #include <probot/telemetry/telemetry.hpp>
 #include <probot/telemetry/console.hpp>
 #include <probot/ds.hpp>
