@@ -1961,12 +1961,22 @@ const char MAIN_page[] PROGMEM = R"=====(
       var ws=new WebSocket('ws://'+location.host+'/joystick');
       ws.binaryType='arraybuffer';
       ws.onopen=function(){wsConnected=true;wsLastActivity=performance.now();evlog('info','WebSocket bağlandı');updateDebugPanel();
-        dkReset();dkLastQ=Date.now();try{ws.send(new Uint8Array([0x51]));}catch(e){} /* 'Q': robot re-sends every topic */};
+        dkReset();dkLastQ=Date.now();try{ws.send(new Uint8Array([0x51]));}catch(e){} /* 'Q': robot re-sends every topic */
+        sendClock(ws);};
       ws.onclose=function(){wsConnected=false;wsJoystick=null;scheduleReconnect();updateDebugPanel();};
       ws.onerror=function(){wsConnected=false;};
       ws.onmessage=handleWsMessage;
       wsJoystick=ws;
     }catch(e){scheduleReconnect();}
+  }
+  /* 'U': the robot has no RTC, so it takes the browser's UTC time for its
+     logs (i64 Unix ms, little-endian). */
+  function sendClock(ws){
+    var b=new Uint8Array(9),t=Date.now();
+    if(!ws||ws.readyState!==1) return;
+    b[0]=0x55;
+    for(var i=1;i<9;i++){b[i]=t%256;t=Math.floor(t/256);}
+    try{ws.send(b);}catch(e){}
   }
   function scheduleReconnect(){
     if(wsReconnectTimer) return;

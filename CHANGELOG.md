@@ -99,6 +99,12 @@ Biçim [Keep a Changelog](https://keepachangelog.com/), sürümler
   512 bytes; `write()` splits longer text. Protocol: new `'L'` push frame;
   `'Q'` also re-sends the console. PB-E307 when the ring cannot be
   allocated.
+- Wall clock: the Driver Station page sends the browser's UTC time when it
+  connects (new `'U'` frame) and the robot sets its system clock from it,
+  so `time()` and `gettimeofday()` give real UTC time for logs. The first
+  valid time always sets it; later ones only while the robot is stopped
+  (not between autonomous and TeleOp). `ds::systemTimeValid()` reports
+  whether it has been set since boot.
 
 ### Changed
 - `probot::printf` can fill the whole 256-byte telemetry panel in one call
