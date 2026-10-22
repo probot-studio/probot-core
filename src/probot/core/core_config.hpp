@@ -22,7 +22,10 @@ namespace probot {
                 "[PB-E107] PROBOT_USER_STACK must be at least 4096 bytes. Docs: probotstudio.com/docs/hatalar/#pb-e107");
 }
 
-// User cadence: how often initLoop/loop hooks are called (~50 Hz).
+// User cadence: how often initLoop/loop hooks are called (~50 Hz). Fixed
+// rate; probot::setLoopPeriodMs() changes it at runtime.
 #ifndef USER_LOOP_PERIOD_MS
 #define USER_LOOP_PERIOD_MS 20
 #endif
+static_assert((USER_LOOP_PERIOD_MS) >= 1 && (USER_LOOP_PERIOD_MS) <= 1000,
+              "[PB-E109] USER_LOOP_PERIOD_MS must be 1-1000 ms. Docs: probotstudio.com/docs/hatalar/#pb-e109");

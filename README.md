@@ -72,12 +72,11 @@ void teleopLoop() {                // called repeatedly (~50 Hz)
   float forward = js.getLeftY();   // -1..+1 (forward is positive)
   bool  button  = js.getA();
   // your motor code goes here
-  delay(20);
 }
 void teleopStop() {}               // stop safely every time TeleOp is left
 
 void autonomousInit() {}
-void autonomousLoop() { delay(100); }
+void autonomousLoop() {}
 void autonomousStop() {}           // stop safely every time Auto is left
 ```
 
@@ -132,7 +131,7 @@ All of them are defined **before** the `#include <probot.h>` line.
 | `PROBOT_BATTERY_INA_ADDR` | `0x40` | INA I2C address |
 | `PROBOT_BATTERY_INA_SDA` / `_SCL` | board default | I2C pins for the INA |
 | `PROBOT_BATTERY_TRIM` | `1.0f` | Fine-tuning multiplier against a multimeter (0.5-2.0) |
-| `USER_LOOP_PERIOD_MS` | `20` | Call period of InitLoop/loop (~50 Hz) |
+| `USER_LOOP_PERIOD_MS` | `20` | Fixed-rate call period of InitLoop/loop (~50 Hz), 1-1000; change at runtime with `probot::setLoopPeriodMs()` |
 | `PROBOT_USER_STACK` | `8192` | User task stack in bytes (at least 4096) [PB-E107] |
 | `PROBOT_DASH_MAX_TOPICS` / `_MAX_VALUE` / `_POOL_BYTES` | `128` / `1024` / `32768` | Dashboard topic store limits (advanced, see API.md) [PB-E108] |
 | `NEOPIXEL_BRIGHTNESS` | `32` | Status LED brightness (0-255) |
@@ -357,8 +356,8 @@ Rules:
 - For servos use raw LEDC: ledcAttachChannel(pin,50,14,7) in the relevant
   init (high channel, so it does not collide with motor analogWrite), and
   ledcWrite in teleopLoop.
-- teleopLoop is called at ~50 Hz; do not write infinite loops or long
-  blocking calls in it.
+- teleopLoop is called at ~50 Hz; do not write infinite loops, long
+  blocking calls or delay() in it.
 ```
 
 Machine-readable summary: [`llms.txt`](llms.txt) · Full reference: [`API.md`](API.md)

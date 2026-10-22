@@ -9,6 +9,7 @@
 
 void teleopInit() {
   Serial.begin(115200);
+  probot::setLoopPeriodMs(100);   // 10 Hz keeps the Serial output readable
 }
 
 void teleopLoop() {
@@ -41,12 +42,10 @@ void teleopLoop() {
   probot::println();
 
   probot::printf("POV=%d  Seq=%lu\n", js.getPOV(), static_cast<unsigned long>(js.getSeq()));
-
-  delay(100);
 }
 
-void teleopStop() {}
+void teleopStop() { probot::setLoopPeriodMs(0); }   // back to USER_LOOP_PERIOD_MS
 
 void autonomousInit() { Serial.begin(115200); }
-void autonomousLoop() { delay(100); }
+void autonomousLoop() {}
 void autonomousStop() {}

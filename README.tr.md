@@ -36,12 +36,11 @@ void teleopLoop() {                // ~50 Hz tekrar çağrılır
   float ileri = js.getLeftY();     // -1..+1 (ileri pozitif)
   bool  buton = js.getA();
   // motor kodun burada
-  delay(20);
 }
 void teleopStop() {}               // TeleOp'tan her çıkışta güvenli durdur
 
 void autonomousInit() {}
-void autonomousLoop() { delay(100); }
+void autonomousLoop() {}
 void autonomousStop() {}           // Auto'dan her çıkışta güvenli durdur
 ```
 
@@ -94,7 +93,7 @@ Hepsi `#include <probot.h>` satırından **önce** tanımlanır:
 | `PROBOT_BATTERY_INA_ADDR` | `0x40` | INA I2C adresi |
 | `PROBOT_BATTERY_INA_SDA` / `_SCL` | kart default'u | INA için I2C pinleri |
 | `PROBOT_BATTERY_TRIM` | `1.0f` | Multimetreyle ince ayar çarpanı (0.5-2.0) |
-| `USER_LOOP_PERIOD_MS` | `20` | InitLoop/loop çağrı periyodu (~50 Hz) |
+| `USER_LOOP_PERIOD_MS` | `20` | InitLoop/loop sabit hızlı çağrı periyodu (~50 Hz), 1-1000; çalışırken `probot::setLoopPeriodMs()` |
 | `PROBOT_USER_STACK` | `8192` | User task stack'i, bayt (en az 4096) [PB-E107] |
 | `PROBOT_DASH_MAX_TOPICS` / `_MAX_VALUE` / `_POOL_BYTES` | `128` / `1024` / `32768` | Dashboard topic deposu sınırları (ileri seviye, bkz. API.md) [PB-E108] |
 | `NEOPIXEL_BRIGHTNESS` | `32` | Durum LED'i parlaklığı (0-255) |
@@ -305,7 +304,7 @@ Kurallar:
   metodlar YOKTUR.
 - Servo için ham LEDC kullan: ilgili init'te ledcAttachChannel(pin,50,14,7)
   (yüksek kanal → motor analogWrite'ıyla çakışmaz), teleopLoop'ta ledcWrite.
-- teleopLoop ~50 Hz çağrılır; içinde sonsuz döngü/uzun blocking yapma.
+- teleopLoop ~50 Hz çağrılır; içinde sonsuz döngü/uzun blocking/delay() yapma.
 ```
 
 Makine-okur özet: [`llms.txt`](llms.txt) · Tam referans: [`API.md`](API.md)

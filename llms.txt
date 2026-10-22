@@ -35,8 +35,10 @@ Rules that generated code MUST follow:
   never shares a timer with `analogWrite` motor PWM → no jitter); in the loop
   `ledcWrite(pin, us * 16383 / 20000)` for a 500-2500 us pulse. Not ESP32Servo,
   not analogWrite (1 kHz can't make a 50 Hz servo frame).
-- initLoop/loop hooks are called repeatedly (~50 Hz); do not write infinite
-  loops or block longer than 2 s inside them.
+- initLoop/loop hooks are called at a fixed rate (default 20 ms, ~50 Hz;
+  `probot::setLoopPeriodMs(ms)` changes it); do not write infinite loops or
+  block longer than 2 s inside them, and do not call `delay()` in them
+  (the library already waits between passes).
 - Telemetry to the driver station panel: `probot::printf("v=%.2f\n", v);`
 - Extra .cpp files include `<probot/api.hpp>` (config-free), never
   `<probot.h>`, which belongs to the sketch only.

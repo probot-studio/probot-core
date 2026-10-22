@@ -53,8 +53,6 @@ void teleopLoop() {
   // Bağlantı koptuğunda kütüphane eksenleri sıfırlar -> motorlar durur.
   setMotor(LEFT_RPWM,  LEFT_LPWM,  js.getLeftY(),  LEFT_INVERTED);
   setMotor(RIGHT_RPWM, RIGHT_LPWM, js.getRightY(), RIGHT_INVERTED);
-
-  delay(20);
 }
 
 void teleopStop() {
@@ -84,7 +82,6 @@ void autonomousLoop() {
   if (millis() - autoStartTime >= 2000) {
     stopMotors();
   }
-  delay(20);
 }
 
 void autonomousStop() {

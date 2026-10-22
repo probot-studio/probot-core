@@ -5,6 +5,7 @@
 #include <probot/core/core_config.hpp>
 #include <probot/core/wdt.hpp>
 #include <probot/core/lifecycle.hpp>
+#include <probot/core/loop_timing.hpp>
 #include <probot/core/status_led.hpp>
 #include <probot/io/battery.hpp>
 #include <probot/framework.hpp>
@@ -168,12 +169,25 @@ namespace probot {
       auto& rs = probot::robot::state();
       primeLoopHeartbeat();
       if (fw.boot) fw.boot();
+      core::LoopPacer pacer;
+      pacer.start(xTaskGetTickCount());
       for(;;){
         DesiredState req = unpackRequested(
           __atomic_load_n(&g_requested_state, __ATOMIC_SEQ_CST));
+        const DesiredState before = g_machine.current();
         g_machine.cycle(hooks, fw.preCycle, fw.postCycle, req, rs, millis(), &zeroInputs,
                         &probot::robot::g_loop_heartbeat_ms, &userClockNow);
-        vTaskDelay(pdMS_TO_TICKS(USER_LOOP_PERIOD_MS));
+
+        TickType_t period = pdMS_TO_TICKS(probot::loopPeriodMs());
+        bool overrun = false;
+        TickType_t sleep = pacer.afterCycle(xTaskGetTickCount(), period ? period : 1,
+                                            g_machine.current() != before, &overrun);
+        if (overrun) __atomic_add_fetch(&core::g_loop_overruns, 1u, __ATOMIC_SEQ_CST);
+        // The sleep is not user code: stamp the heartbeat past it so a long
+        // period never reads as a stall.
+        __atomic_store_n(&probot::robot::g_loop_heartbeat_ms,
+                         core::wakeStampMs(millis(), sleep, portTICK_PERIOD_MS), __ATOMIC_SEQ_CST);
+        vTaskDelay(sleep);
       }
     }
 
@@ -365,6 +379,7 @@ namespace probot {
     // TU happens to construct the services.
     probot::io::gamepad().setTimeoutMs(PROBOT_INPUT_TIMEOUT_MS);
     probot::io::rawGamepad().setTimeoutMs(PROBOT_INPUT_TIMEOUT_MS);
+    __atomic_store_n(&core::g_loop_period_default_ms, (uint32_t)USER_LOOP_PERIOD_MS, __ATOMIC_SEQ_CST);
     __atomic_store_n(&probot::robot::g_utility_hooks,
                      detail::orEmpty(&::utilityLoop) != &detail::emptyHook ? 1u : 0u, __ATOMIC_SEQ_CST);
     probot::dashboard::detail::configure({ PROBOT_DASH_MAX_TOPICS, PROBOT_DASH_MAX_SCHEMAS,
