@@ -345,11 +345,11 @@ namespace probot {
           uint32_t dsAct = __atomic_load_n(&probot::robot::g_ds_last_activity_ms, __ATOMIC_SEQ_CST);
           Status st = probot::robot::state().status();
           if (core::dsLinkLost(st, now, dsAct, PROBOT_DS_TIMEOUT_MS)){
-            Serial.printf("[SYS  ] DS timeout: no activity for %lu ms\n", (unsigned long)(now - dsAct));
 #if PROBOT_DS_TIMEOUT_FORCE_STOP
-            probot::telemetry::println("!! [PB-E303] DS CONNECTION LOST — stopping robot — docs/hatalar#pb-e303");
+            // Stop first: logging can block (see runtime_setup()).
             probot::robot::state().setStatus(now, Status::STOP);
             if (st == Status::START) __atomic_add_fetch(&probot::robot::g_comms_disable_count, 1u, __ATOMIC_SEQ_CST);
+            probot::telemetry::println("!! [PB-E303] DS CONNECTION LOST — stopping robot — docs/hatalar#pb-e303");
 #else
             probot::telemetry::println("!! [PB-E304] DS CONNECTION LOST — joystick neutral, waiting reconnect — docs/hatalar#pb-e304");
 #endif
@@ -359,6 +359,7 @@ namespace probot {
             }
 #endif
             __atomic_store_n(&probot::robot::g_ds_last_activity_ms, 0u, __ATOMIC_SEQ_CST);
+            Serial.printf("[SYS  ] DS timeout: no activity for %lu ms\n", (unsigned long)(now - dsAct));
           }
         }
 
@@ -383,6 +384,19 @@ namespace probot {
 
   inline void runtime_setup(){
     Serial.begin(115200);
+#if defined(ARDUINO_USB_MODE) && ARDUINO_USB_MODE && defined(ARDUINO_USB_CDC_ON_BOOT) && ARDUINO_USB_CDC_ON_BOOT
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 3, 9)
+    // Serial is the USB Serial/JTAG CDC. From core 3.3.9, while a host keeps
+    // the port open without reading, each write that finds the 256-byte TX
+    // buffer full waits up to 20 x the TX timeout (100 ms by default: ~2 s,
+    // every time), and the sysloop, which also runs the emergency stop, logs.
+    // 5 ms bounds that to ~100 ms per write; text that does not fit is
+    // dropped. Not lower: the TX lock and flush() use the same timeout, so a
+    // second printing task or a flush() with a reading host would lose text.
+    // Older cores stop waiting after one ~100 ms timeout on their own.
+    HWCDCSerial.setTxTimeoutMs(5);
+#endif
+#endif
     delay(200);
     Serial.println("\n[Probot] Core0=DS+SYS, Core1=USER (cooperative lifecycle)");
 

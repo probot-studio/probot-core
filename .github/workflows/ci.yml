@@ -74,6 +74,8 @@ jobs:
             ./tests/control_tests
           else
             make build EXAMPLE=all
+            # Generic ESP32-S3: USB CDC On Boot off and the default 1.25 MB app partition.
+            make build EXAMPLE=JoystickTest FQBN=esp32:esp32:esp32s3 BUILD_DIR_BASE="$PWD/.build/generic"
             make tests/control_tests
             ./tests/control_tests
           fi

@@ -12,8 +12,8 @@
 //   2) INA219 / INA226 I2C sensörü:
 //        #define PROBOT_BATTERY_INA        226   // 219 ya da 226
 //        #define PROBOT_BATTERY_INA_ADDR   0x40  // (ops.) I2C adresi
-//        #define PROBOT_BATTERY_INA_SDA    8     // (ops.) verilmezse kart default'u
-//        #define PROBOT_BATTERY_INA_SCL    9     // (ops.)
+//        #define PROBOT_BATTERY_INA_SDA    1     // (ops.) default 1 / 2: the Pulse J3 header
+//        #define PROBOT_BATTERY_INA_SCL    2     // (ops.)
 //        #define PROBOT_BATTERY_INA_SHUNT_MOHM 100 // (ops.) akım hesabı için
 //
 //   Ortak (ops.): #define PROBOT_BATTERY_TRIM 1.00f  // multimetre ince ayarı
@@ -71,20 +71,31 @@
   #if defined(PROBOT_BATTERY_INA_SDA) != defined(PROBOT_BATTERY_INA_SCL)
   #error "[PB-E105] I2C pinleri yarim tanimli: PROBOT_BATTERY_INA_SDA ve PROBOT_BATTERY_INA_SCL birlikte verilmeli (ya ikisi ya hicbiri). Docs: probotstudio.com/docs/hatalar/#pb-e105"
   #endif
-  #if defined(PROBOT_BATTERY_INA_SDA)
+  #ifndef PROBOT_BATTERY_INA_SDA
+  // The I2C header (J3) of the recommended Boardoza Pulse board. The core's
+  // generic ESP32-S3 pins (8 / 9) are on no Pulse header.
+  #define PROBOT_BATTERY_INA_SDA 1
+  #define PROBOT_BATTERY_INA_SCL 2
+  #endif
   static_assert((PROBOT_BATTERY_INA_SDA) != (PROBOT_BATTERY_INA_SCL),
     "[PB-E105] SDA ve SCL ayni pin olamaz. Docs: probotstudio.com/docs/hatalar/#pb-e105");
-    #ifdef PROBOT_ESTOP_ENABLE_PIN
-    static_assert((PROBOT_BATTERY_INA_SDA) != (PROBOT_ESTOP_ENABLE_PIN) &&
-                  (PROBOT_BATTERY_INA_SCL) != (PROBOT_ESTOP_ENABLE_PIN),
-      "[PB-E105] INA I2C pini PROBOT_ESTOP_ENABLE_PIN ile cakisiyor — acil durdurma hatti I2C'ye devredilemez. Docs: probotstudio.com/docs/hatalar/#pb-e105");
-    #endif
-    #ifdef PROBOT_RSL_PIN
-    static_assert((PROBOT_BATTERY_INA_SDA) != (PROBOT_RSL_PIN) &&
-                  (PROBOT_BATTERY_INA_SCL) != (PROBOT_RSL_PIN),
-      "[PB-E105] INA I2C pini PROBOT_RSL_PIN ile cakisiyor. Docs: probotstudio.com/docs/hatalar/#pb-e105");
-    #endif
+  #ifdef PROBOT_ESTOP_ENABLE_PIN
+  static_assert((PROBOT_BATTERY_INA_SDA) != (PROBOT_ESTOP_ENABLE_PIN) &&
+                (PROBOT_BATTERY_INA_SCL) != (PROBOT_ESTOP_ENABLE_PIN),
+    "[PB-E105] INA I2C pini PROBOT_ESTOP_ENABLE_PIN ile cakisiyor — acil durdurma hatti I2C'ye devredilemez. Docs: probotstudio.com/docs/hatalar/#pb-e105");
   #endif
+  #ifdef PROBOT_RSL_PIN
+  static_assert((PROBOT_BATTERY_INA_SDA) != (PROBOT_RSL_PIN) &&
+                (PROBOT_BATTERY_INA_SCL) != (PROBOT_RSL_PIN),
+    "[PB-E105] INA I2C pini PROBOT_RSL_PIN ile cakisiyor. Docs: probotstudio.com/docs/hatalar/#pb-e105");
+  #endif
+  // builtin.hpp (included later) defaults NEOPIXEL_PIN to 3, the on-board LED.
+  #ifdef NEOPIXEL_PIN
+  static_assert((PROBOT_BATTERY_INA_SDA) != (NEOPIXEL_PIN) && (PROBOT_BATTERY_INA_SCL) != (NEOPIXEL_PIN),
+  #else
+  static_assert((PROBOT_BATTERY_INA_SDA) != 3 && (PROBOT_BATTERY_INA_SCL) != 3,
+  #endif
+    "[PB-E105] INA I2C pin conflicts with NEOPIXEL_PIN (default 3). Docs: probotstudio.com/docs/hatalar/#pb-e105");
 #else
   #define PROBOT_BATTERY_ENABLED 0
 #endif
@@ -242,11 +253,7 @@ namespace detail {
 #if PROBOT_BATTERY_SRC_ADC
     analogSetPinAttenuation((uint8_t)PROBOT_BATTERY_ADC_PIN, ADC_11db);
 #else
-  #if defined(PROBOT_BATTERY_INA_SDA) && defined(PROBOT_BATTERY_INA_SCL)
     Wire.begin(PROBOT_BATTERY_INA_SDA, PROBOT_BATTERY_INA_SCL);
-  #else
-    Wire.begin();
-  #endif
     Wire.setClock(100000);
     Wire.setTimeOut(20); // bound each transaction when the sensor is absent
     inaConfigure();

@@ -72,7 +72,8 @@ Rules that generated code MUST follow:
 - Battery gauge in the UI: EITHER a voltage divider on an ADC1 pin
   (`PROBOT_BATTERY_ADC_PIN` 1-10 only — ADC2 pins 11-20 do not work with
   WiFi on — plus `PROBOT_BATTERY_R_TOP_K`/`_R_BOT_K` in kΩ), OR an I2C
-  sensor (`PROBOT_BATTERY_INA 219` or `226`), never both. Without either,
+  sensor (`PROBOT_BATTERY_INA 219` or `226`; I2C on SDA 1 / SCL 2 unless
+  `PROBOT_BATTERY_INA_SDA`/`_SCL` are both defined), never both. Without either,
   feed it manually with `probot::setBatteryVoltage(v)` or the UI shows
   "Veri yok". INA current: `probot::io::battery::currentAmps()` (NaN
   without an INA sensor). Low battery: `probot::io::battery::setLowVoltage(v)`

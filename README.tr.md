@@ -17,9 +17,42 @@ ve joystick verisini WebSocket ile düşük gecikmeyle robota taşır.
    git clone https://github.com/probot-studio/probot-core ~/Arduino/libraries/probot-core
    ```
 2. **ESP32 core:** Boards Manager → "esp32" (Espressif) → **3.x** kurulu olmalı.
-3. **Kart:** `ESP32S3 Dev Module` (veya `ESP32 Dev Module`).
+3. **Kart:** `ESP32S3 Dev Module`; Tools ayarları aşağıda (Kart ayarları).
 4. **Partition:** Tools → Partition Scheme → **Huge APP (3MB No OTA)**.
    Bu ayar şart — varsayılan bölüm yetersiz, derleme sığmaz.
+
+### Kart ayarları
+
+Önerilen kart Boardoza Pulse S32-S3 (ESP32-S3-WROOM-1-N4R2: 4 MB flash,
+2 MB quad PSRAM, doğrudan USB-C). Tools menüsü:
+
+| Ayar | Değer |
+|---|---|
+| Board | ESP32S3 Dev Module |
+| Flash Size | 4MB (32Mb) |
+| Partition Scheme | Huge APP (3MB No OTA/1MB SPIFFS) |
+| PSRAM | QSPI PSRAM |
+| USB Mode | Hardware CDC and JTAG |
+| USB CDC On Boot | Enabled |
+
+USB CDC On Boot kapalıyken `Serial` (kütüphanenin açılış yazısı, WiFi adı
+ve kayıtları) USB-C'ye değil UART0'a (J4'te IO43/IO44) gider. Açıkken ve Arduino-ESP32
+3.3.9 ya da sonrasında, port açık tutulup okunmadığında bir `Serial`
+yazması en çok ~100 ms bekler; sığmayan metin atılır. Bu ayarların `arduino-cli` FQBN'i:
+`esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=huge_app,PSRAM=enabled,CDCOnBoot=cdc`.
+
+Kütüphanenin kullandığı ya da seçeneklerine uyan Pulse pinleri (kartın
+üzerindeki baskıdan):
+
+| Pin | Kullanım |
+|---|---|
+| IO3 | Karttaki RGB LED: durum LED'i (`NEOPIXEL_PIN`, varsayılan 3) |
+| IO1 (SDA) / IO2 (SCL), J3 | I2C soketi: INA batarya sensörünün varsayılan pinleri; başka I2C cihazları da paylaşabilir |
+| IO7 (J5 CS), IO10 (J4) | `PROBOT_BATTERY_ADC_PIN` bölücüsü için ADC1 pinleri; J3 I2C için kullanılmıyorsa IO1 / IO2 de. Varsayılan yok: kartın batarya girişinin (J1) bilinen bir ölçüm pini yok |
+| IO47 / IO48 (J8), IO35-IO38 (J6) | `PROBOT_RSL_PIN` ya da `PROBOT_ESTOP_ENABLE_PIN` için boş GPIO (ikisi de varsayılan kapalı) |
+| IO0, IO45, IO46 | Strapping pinleri (LED'in pini IO3 gibi): RSL ya da acil durdurma hattı için kullanmayın |
+| IO43 / IO44 | UART0 (USB CDC On Boot kapalıyken seri konsol) |
+| IO19 / IO20 | Doğrudan USB |
 
 ## İlk robot (5 dakika)
 
@@ -91,7 +124,7 @@ Hepsi `#include <probot.h>` satırından **önce** tanımlanır:
 | `PROBOT_BATTERY_R_TOP_K` / `_R_BOT_K` | — | Bölücü dirençleri, kΩ (batarya tarafı / GND tarafı). 3S için öneri: 100k/22k → 12.6 V'ta 2.27 V |
 | `PROBOT_BATTERY_INA` | kapalı | Batarya ölçümü, yöntem 2: I2C sensör — `219` ya da `226`. ADC yöntemiyle birlikte kullanılamaz [PB-E105] |
 | `PROBOT_BATTERY_INA_ADDR` | `0x40` | INA I2C adresi |
-| `PROBOT_BATTERY_INA_SDA` / `_SCL` | kart default'u | INA için I2C pinleri |
+| `PROBOT_BATTERY_INA_SDA` / `_SCL` | `1` / `2` | INA için I2C pinleri (Pulse J3 soketi). İkisi birlikte verilir ya da hiçbiri [PB-E105] |
 | `PROBOT_BATTERY_TRIM` | `1.0f` | Multimetreyle ince ayar çarpanı (0.5-2.0) |
 | `USER_LOOP_PERIOD_MS` | `20` | InitLoop/loop sabit hızlı çağrı periyodu (~50 Hz), 1-1000; çalışırken `probot::setLoopPeriodMs()` |
 | `PROBOT_USER_STACK` | `8192` | User task stack'i, bayt (en az 4096) [PB-E107] |
@@ -214,11 +247,18 @@ Sensöre ulaşılamazsa çalışma zamanında [PB-E306] uyarısı düşer ve gö
 uyarısı için `probot::io::battery::setLowVoltage(volt)` eşiği verip
 `isLowVoltage()` okunur (varsayılan kapalı).
 
-> **INA'nın I2C bus'ını kullanıcı kodundan kullanmayın.** Kütüphane INA'yı
-> kendi görev döngüsünden okur; aynı `Wire` bus'ına robot kodunuzdan ikinci
-> bir cihaz (IMU, OLED...) bağlarsanız okumalar karışabilir. Kendi I2C
-> cihazınız varsa ya batarya için ADC yöntemini seçin ya da cihazınızı
-> `Wire1`'e (ayrı pinler) taşıyın.
+> **INA'nın I2C bus'ını paylaşmak:** kütüphane `Wire`'ı
+> `PROBOT_BATTERY_INA_SDA` / `_SCL` (varsayılan 1 / 2) pinlerinde 100 kHz ve
+> 20 ms işlem zaman aşımıyla başlatır, INA'yı kendi görevinden okur. Aynı
+> pinlerdeki başka bir cihaz (IMU, OLED...) robot kodundan `Wire`'ı
+> kullanabilir: bus aktarımları sıraya girer. Alınan baytlar girmez:
+> `Wire.read()` onları ortak bir tampondan okur, ikisi aynı anda okursa
+> nadiren iki cihazdan birinin okuması yanlış çıkar. Her okuması önemli
+> olan cihazı `Wire1`'e (başka pinler) koyun. `Wire`'ı aynı pinlerle
+> (`Wire.begin(1, 2)`) başlatın ya da hiç başlatmayın: ilk çalışan
+> `Wire.begin()` pinleri belirler, başka pinler INA'yı ulaşılamaz yapar
+> [PB-E306]. Robot kodundaki `Wire.setClock()` ve `Wire.setTimeOut()` INA'ya
+> da uygulanır.
 >
 > **Shunt notu:** akım hesabı `PROBOT_BATTERY_INA_SHUNT_MOHM` (default 100)
 > ile yapılır. INA226'nın ±81.92 mV shunt aralığı 100 mΩ ile ±0.82 A'da
@@ -351,7 +391,8 @@ input streams over a binary WebSocket at 50 Hz with automatic failsafes
 **Install:** Arduino IDE Library Manager → "probot", or clone
 https://github.com/probot-studio/probot-core into `~/Arduino/libraries/`.
 Requires arduino-esp32 core 3.x and the **Huge APP (3MB No OTA)**
-partition scheme.
+partition scheme. Board settings for the recommended Boardoza Pulse
+S32-S3 (USB CDC On Boot Enabled and more): see README.md, "Board settings".
 
 **Minimal sketch:** see the Turkish quick start above — the code is
 identical. Define the three `PROBOT_WIFI_*` macros, include `probot.h`,

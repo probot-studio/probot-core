@@ -19,7 +19,9 @@ joystick data and the robot stops after 10 s of Driver Station silence.
   ESP32 variants may be adaptable but are outside the official support
   scope.
 - Recommended board: Boardoza Pulse S32-S3
-  ([purchase](https://boardoza.com/product/boardoza-pulse-s32-s3-breakout-board/)).
+  ([purchase](https://boardoza.com/product/boardoza-pulse-s32-s3-breakout-board/)),
+  with ESP32-S3-WROOM-1-N4R2 (4 MB flash, 2 MB quad PSRAM) and native USB-C.
+  Settings and pins: [Board settings](#board-settings).
 - Requires the Arduino-ESP32 core **3.x** (the ESP-IDF component metadata
   asks for `espressif/arduino-esp32 >= 3.0.0` and ESP-IDF `>= 5.0`).
 - Built-in status LED support depends on the Adafruit NeoPixel library.
@@ -35,15 +37,50 @@ joystick data and the robot stops after 10 s of Driver Station silence.
    ```
 2. **ESP32 core:** Boards Manager → "esp32" (Espressif) → version **3.x**
    must be installed.
-3. **Board:** `ESP32S3 Dev Module` (or `ESP32 Dev Module`).
+3. **Board:** `ESP32S3 Dev Module`, with the Tools settings in
+   [Board settings](#board-settings).
 4. **Partition scheme:** Tools → Partition Scheme → **Huge APP (3MB No OTA)**.
    This setting is required: the default partition is too small and the
    build will not fit.
 
+### Board settings
+
+Tools menu settings for the Boardoza Pulse S32-S3:
+
+| Setting | Value |
+|---|---|
+| Board | ESP32S3 Dev Module |
+| Flash Size | 4MB (32Mb) |
+| Partition Scheme | Huge APP (3MB No OTA/1MB SPIFFS) |
+| PSRAM | QSPI PSRAM |
+| USB Mode | Hardware CDC and JTAG |
+| USB CDC On Boot | Enabled |
+
+With USB CDC On Boot disabled, `Serial` (the library's boot banner, WiFi
+name and logs) goes to UART0 (IO43/IO44 on J4) instead of the USB-C port.
+With it enabled and Arduino-ESP32 3.3.9 or later, a `Serial` write waits
+at most about 100 ms when a host keeps the port open without reading;
+text that does not fit is dropped.
+The `arduino-cli` FQBN for these settings:
+`esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=huge_app,PSRAM=enabled,CDCOnBoot=cdc`.
+
+Pulse pins the library uses or that suit its options (from the board's
+silkscreen):
+
+| Pin | Use |
+|---|---|
+| IO3 | On-board RGB LED: the status LED (`NEOPIXEL_PIN`, default 3) |
+| IO1 (SDA) / IO2 (SCL), J3 | I2C header: the default INA battery sensor pins; other I2C devices can share it |
+| IO7 (J5 CS), IO10 (J4) | ADC1 pins for a `PROBOT_BATTERY_ADC_PIN` divider; IO1 / IO2 too when J3 is not used for I2C. There is no default: the board's battery input (J1) has no known sense pin |
+| IO47 / IO48 (J8), IO35-IO38 (J6) | Free GPIO for `PROBOT_RSL_PIN` or `PROBOT_ESTOP_ENABLE_PIN` (both off by default) |
+| IO0, IO45, IO46 | Strapping pins (like IO3, the LED): do not use for the RSL or the e-stop line |
+| IO43 / IO44 | UART0 (the serial console with USB CDC On Boot disabled) |
+| IO19 / IO20 | Native USB |
+
 ### arduino-cli
 
 The repository's Makefile builds the examples with `arduino-cli` (default
-board `esp32:esp32:esp32s3`). See [Development](#development-and-testing).
+board: the Pulse settings above; `FQBN=...` overrides it). See [Development](#development-and-testing).
 
 ### PlatformIO
 
@@ -129,7 +166,7 @@ All of them are defined **before** the `#include <probot.h>` line.
 | `PROBOT_BATTERY_R_TOP_K` / `_R_BOT_K` | none | Divider resistors in kΩ (battery side / GND side). Suggestion for 3S: 100k/22k, which gives 2.27 V at 12.6 V |
 | `PROBOT_BATTERY_INA` | off | Battery measurement, method 2: I2C sensor, `219` or `226`. Cannot be combined with the ADC method [PB-E105] |
 | `PROBOT_BATTERY_INA_ADDR` | `0x40` | INA I2C address |
-| `PROBOT_BATTERY_INA_SDA` / `_SCL` | board default | I2C pins for the INA |
+| `PROBOT_BATTERY_INA_SDA` / `_SCL` | `1` / `2` | I2C pins for the INA (the Pulse J3 header). Define both or neither [PB-E105] |
 | `PROBOT_BATTERY_TRIM` | `1.0f` | Fine-tuning multiplier against a multimeter (0.5-2.0) |
 | `USER_LOOP_PERIOD_MS` | `20` | Fixed-rate call period of InitLoop/loop (~50 Hz), 1-1000; change at runtime with `probot::setLoopPeriodMs()` |
 | `PROBOT_USER_STACK` | `8192` | User task stack in bytes (at least 4096) [PB-E107] |
@@ -257,11 +294,18 @@ sensor). For a low-battery warning, set a threshold with
 `probot::io::battery::setLowVoltage(volts)` and read `isLowVoltage()` (off
 by default).
 
-> **Do not use the INA's I2C bus from user code.** The library reads the INA
-> from its own task loop; if you attach a second device (IMU, OLED...) from
-> your robot code to the same `Wire` bus, readings can get mixed up. If you
-> have your own I2C device, either choose the ADC method for the battery or
-> move your device to `Wire1` (separate pins).
+> **Sharing the INA's I2C bus:** the library starts `Wire` on
+> `PROBOT_BATTERY_INA_SDA` / `_SCL` (1 / 2 by default) at 100 kHz with a
+> 20 ms transaction timeout, and reads the INA from its own task. Another
+> device (IMU, OLED...) on the same pins can use `Wire` from robot code:
+> bus transfers are serialized. The received bytes are not: `Wire.read()`
+> takes them from one shared buffer, so on rare occasions a reading of
+> either device is wrong when both read at the same moment. Put a device
+> whose every reading matters on `Wire1` (other pins). Start `Wire` with
+> the same pins (`Wire.begin(1, 2)`) or not at all: whichever
+> `Wire.begin()` runs first fixes the pins, so other pins leave the INA
+> unreachable [PB-E306]. `Wire.setClock()` and `Wire.setTimeOut()` from
+> robot code apply to the INA too.
 >
 > **Shunt note:** current is computed with `PROBOT_BATTERY_INA_SHUNT_MOHM`
 > (default 100). The INA226's +/-81.92 mV shunt range saturates at +/-0.82 A

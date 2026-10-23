@@ -9,6 +9,16 @@ Biçim [Keep a Changelog](https://keepachangelog.com/), sürümler
 ## [Unreleased]
 
 ### Breaking
+- INA battery sensor: without `PROBOT_BATTERY_INA_SDA` / `_SCL` the
+  library now starts `Wire` on SDA 1 / SCL 2, the I2C header (J3) of the
+  recommended Boardoza Pulse board, instead of the core's generic
+  ESP32-S3 pins (SDA 8 / SCL 9), which are on no Pulse header. To keep an
+  INA on 8 / 9, define `PROBOT_BATTERY_INA_SDA 8` and
+  `PROBOT_BATTERY_INA_SCL 9`. The default pins now also go through the
+  PB-E105 conflict checks, so an INA sketch without its own pins that puts
+  `PROBOT_ESTOP_ENABLE_PIN` or `PROBOT_RSL_PIN` on GPIO 1 or 2 no longer
+  compiles. A new PB-E105 check rejects INA pins equal to `NEOPIXEL_PIN`
+  (default 3).
 - `initLoop`/`loop` run at a fixed rate: passes start on a fixed schedule
   one period apart, so the hook's own run time no longer stretches the
   period (it used to sleep a full period after the work). An overrun does
@@ -202,6 +212,19 @@ Biçim [Keep a Changelog](https://keepachangelog.com/), sürümler
   frame; it used to read about 0 while the robot was disabled.
   `GamepadService::lastWriteMs()` is now `lastFrameMs()` with the same
   meaning (the old name remains as an alias).
+- With USB CDC On Boot enabled on Arduino-ESP32 3.3.9 or later, a
+  `Serial` write gives up after about 100 ms instead of about 2 s while a
+  host keeps the port open without reading (`HWCDCSerial.setTxTimeoutMs(5)`
+  in `runtime_setup()`; text that does not fit is dropped). Older cores
+  already stop waiting after one timeout. A sketch that raises the timeout
+  again lets a stalled port hold the sysloop, which also runs the
+  emergency stop, for seconds. A Driver Station timeout now stops the
+  robot and closes the connection before it logs.
+- The README lists the Tools settings and pins of the recommended
+  Boardoza Pulse S32-S3 board (USB CDC On Boot Enabled sends `Serial` to
+  the USB-C port), and `make build` uses them by default
+  (`FQBN=esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=huge_app,PSRAM=enabled,CDCOnBoot=cdc`).
+  CI also builds one example for the generic `esp32:esp32:esp32s3`.
 
 ## [0.4.0] — Probot Studio Uyumu — 2026-07-17
 
