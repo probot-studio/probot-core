@@ -21,6 +21,10 @@
 // compares them to drop duplicates. A topic's payload must not exceed
 // Limits::maxValue.
 
+// PERSISTENT topics keep Driver Station edits across reboots (only edits
+// robot code accepted), with clearPersisted().
+#define PROBOT_HAS_DASH_PERSIST 1
+
 namespace probot::dashboard {
 
   using TopicId = uint16_t;
@@ -68,6 +72,23 @@ namespace probot::dashboard {
       uint32_t len, cap;
       uint8_t* write;
       uint16_t writeLen;
+      // Persistence (PERSISTENT topics). Only values the robot accepted
+      // from a Driver Station write are stored: a drained write is the
+      // candidate (cand) until rejectWrite() drops it, or a newer write is
+      // drained or kPersistDebounceMs pass; it then becomes the value to
+      // store (tuned). restorePending: the pending write is the stored
+      // value. restoreDelivered / dsDelivered: the last drained write was the
+      // stored value / a Driver Station write. eraseStored: the stored value
+      // was refused. restoreFailed: it could not be read (reported once).
+      // oversize: an accepted write over kMaxPersistValue, reported instead
+      // of kept.
+      bool     restorePending, restoreDelivered, dsDelivered, eraseStored, restoreFailed, failReported;
+      bool     oversize;
+      bool     candFresh;                    // persistTick() has not seen cand yet
+      uint8_t* cand;
+      uint8_t* tuned;
+      uint16_t candLen, tunedLen;
+      uint32_t candSince;                    // when persistTick() first saw cand
     };
 
     struct Schema { char* name; char* type; uint8_t* data; uint16_t len; bool sent; };
@@ -91,9 +112,81 @@ namespace probot::dashboard {
       Ack       acks[kAcks]{};
       uint8_t   ackHead = 0, ackCount = 0;
       volatile uint32_t draining = 0;
+      bool      persistUsed = false;     // a PERSISTENT topic was published
+      uint32_t  persistEpoch = 0;        // bumped by clearPersisted()
+      bool      persistClearing = false;  // clearPersisted() has not erased yet
     };
 
     inline Store g_store;
+
+    // Flash storage for PERSISTENT topics. The runtime installs NVS on the
+    // ESP32; it is null on the host unless a test installs one.
+    struct PersistBackend {
+      // Copies key's record into buf and returns its length; 0 when the key
+      // is absent or longer than cap (not a record this firmware stored);
+      // -1 when the storage could not be read.
+      long   (*load)(const char* key, uint8_t* buf, size_t cap);
+      bool   (*save)(const char* key, const uint8_t* data, size_t len);
+      bool   (*erase)(const char* key);
+      bool   (*eraseAll)();
+    };
+    inline const PersistBackend* g_persist = nullptr;
+
+    // A drained Driver Station write not refused for this long is accepted.
+    constexpr uint32_t kPersistDebounceMs = 2000;
+    // Largest stored value: NVS is small and shared with WiFi.
+    constexpr uint32_t kMaxPersistValue = 2048;
+    constexpr uint8_t  kRecordVersion = 1;
+    constexpr size_t   kKeyLen = 10;       // "d" + 8 hex digits + NUL (NVS keys: 15 chars)
+
+    // Record layout: version, vt, name length, type length, name, type,
+    // u16 value length, value. The name and type are checked on restore.
+    inline size_t recordCapacity(uint32_t maxValue) {
+      return 4 + 255 + 255 + 2 + (size_t)(maxValue < kMaxPersistValue ? maxValue : kMaxPersistValue);
+    }
+
+    // Topics whose paths share a hash share a key; the restore check then
+    // refuses the other topic's record.
+    inline void persistKey(uint32_t hash, char out[kKeyLen]) {
+      static const char hex[] = "0123456789abcdef";
+      out[0] = 'd';
+      for (int i = 0; i < 8; ++i) out[1 + i] = hex[(hash >> (28 - 4 * i)) & 0xF];
+      out[9] = '\0';
+    }
+
+    inline size_t encodeRecord(const char* name, uint8_t vt, const char* type,
+                               const uint8_t* value, size_t len, uint8_t* out, size_t cap) {
+      size_t nl = strlen(name), tl = strlen(type);
+      size_t n = 4 + nl + tl + 2 + len;
+      if (nl > 255 || tl > 255 || len > 0xFFFF || n > cap) return 0;
+      size_t w = 0;
+      out[w++] = kRecordVersion; out[w++] = vt; out[w++] = (uint8_t)nl; out[w++] = (uint8_t)tl;
+      memcpy(out + w, name, nl); w += nl;
+      memcpy(out + w, type, tl); w += tl;
+      out[w++] = (uint8_t)len; out[w++] = (uint8_t)(len >> 8);
+      if (len) memcpy(out + w, value, len);
+      return n;
+    }
+
+    struct Record {
+      uint8_t vt, nameLen, typeLen;
+      const char* name;
+      const char* type;
+      const uint8_t* value;
+      uint16_t len;
+    };
+
+    inline bool decodeRecord(const uint8_t* b, size_t n, Record& r) {
+      if (n < 6 || b[0] != kRecordVersion) return false;
+      r.vt = b[1]; r.nameLen = b[2]; r.typeLen = b[3];
+      size_t p = 4 + (size_t)r.nameLen + r.typeLen;
+      if (n < p + 2) return false;
+      r.name = (const char*)b + 4;
+      r.type = (const char*)b + 4 + r.nameLen;
+      r.len = (uint16_t)(b[p] | (b[p + 1] << 8));
+      r.value = b + p + 2;
+      return n == p + 2 + r.len;
+    }
 
     // Frame type bytes, robot to Driver Station and back.
     constexpr uint8_t FRAME_ANNOUNCE = 'A', FRAME_VALUES = 'V', FRAME_REMOVE = 'R',
@@ -176,6 +269,12 @@ namespace probot::dashboard {
         }
         default:                     return true;
       }
+    }
+
+    // Bytes a slot's pending write counts against Limits::writeQueueBytes;
+    // a restored value does not count. Caller holds the lock.
+    inline uint32_t queuedBytes(const Slot& s) {
+      return s.writePending && !s.restorePending ? s.writeLen : 0;
     }
 
     // Caller holds the lock.
@@ -266,7 +365,7 @@ namespace probot::dashboard {
         else if ((s->flags & (TUNABLE | MUTABLE)) != (TUNABLE | MUTABLE)) status = WriteStatus::Immutable;
         else if (s->vt != vt) status = WriteStatus::TypeMismatch;
         else if (len > st.lim.maxValue || !wellFormed(vt, data, len)) status = WriteStatus::DecodeError;
-        else if (st.writeBytes - (s->writePending ? s->writeLen : 0) + len > st.lim.writeQueueBytes)
+        else if (st.writeBytes - (queuedBytes(*s)) + len > st.lim.writeQueueBytes)
           status = WriteStatus::QueueFull;
         if (status != WriteStatus::Ok) {
           if (status == WriteStatus::QueueFull) ++st.dropped;
@@ -291,18 +390,69 @@ namespace probot::dashboard {
           status = WriteStatus::UnknownId;
           old = buf;
         } else {
-          if (s->writePending) { old = s->write; st.writeBytes -= s->writeLen; }
+          if (s->writePending) { old = s->write; st.writeBytes -= queuedBytes(*s); }
           else {
             st.fifo[(st.fifoHead + st.fifoCount) % st.lim.maxTopics] = id & 0xFF;
             ++st.fifoCount;
           }
           // Last writer wins: a newer edit replaces the pending one in place.
           s->write = buf; s->writeLen = (uint16_t)len; s->writePending = true;
+          s->restorePending = false;
           st.writeBytes += len;
         }
       }
       free(old);
       return status;
+    }
+
+    // Queues the stored value of a newly published PERSISTENT topic as a
+    // write, so robot code applies it with its first drainWrites() like a
+    // Driver Station edit. Runs on the publishing task. Restores do not
+    // count against Limits::writeQueueBytes (at most one per topic). A
+    // storage read error is reported by persistTick().
+    inline void restore(Store& st, TopicId id, const char* path, ValueType vt, const char* type) {
+      const PersistBackend* be = __atomic_load_n(&g_persist, __ATOMIC_ACQUIRE);
+      if (!be) return;
+      uint32_t maxValue;
+      {
+        core::MuxGuard g(st.mux);
+        maxValue = st.lim.maxValue;
+      }
+      const size_t cap = recordCapacity(maxValue);
+      uint8_t* rec = (uint8_t*)malloc(cap);
+      char key[kKeyLen];
+      persistKey(hashOf(path), key);
+      Record r{};
+      uint8_t* buf = nullptr;
+      long n = rec ? be->load(key, rec, cap) : -1;
+      bool failed = n < 0;
+      if (n > 0 && decodeRecord(rec, (size_t)n, r) && r.vt == (uint8_t)vt &&
+          r.nameLen == strlen(path) && memcmp(r.name, path, r.nameLen) == 0 &&
+          r.typeLen == strlen(type) && memcmp(r.type, type, r.typeLen) == 0 &&
+          r.len <= maxValue && wellFormed(r.vt, r.value, r.len)) {
+        buf = (uint8_t*)malloc(r.len ? r.len : 1);
+        if (buf) memcpy(buf, r.value, r.len);
+        else failed = true;
+      }
+      free(rec);
+      if (failed) {
+        core::MuxGuard g(st.mux);
+        if (Slot* s = liveSlot(st, id)) s->restoreFailed = true;
+        return;
+      }
+      if (!buf) return;
+      {
+        core::MuxGuard g(st.mux);
+        Slot* s = liveSlot(st, id);
+        if (s && !s->writePending) {
+          st.fifo[(st.fifoHead + st.fifoCount) % st.lim.maxTopics] = id & 0xFF;
+          ++st.fifoCount;
+          s->write = buf; s->writeLen = r.len; s->writePending = true;
+          s->restorePending = true;
+          buf = nullptr;
+        }
+      }
+      free(buf);
     }
 
     // Writes the next frame to send into buf and returns its length, or 0
@@ -410,6 +560,7 @@ namespace probot::dashboard {
         for (uint16_t i = 0; i < st.lim.maxTopics; ++i) {
           Slot& s = st.slots[i];
           free(s.name); free(s.type); free(s.props); free(s.value); free(s.write);
+          free(s.cand); free(s.tuned);
         }
         for (uint16_t i = 0; i < st.lim.maxSchemas; ++i) {
           free(st.schemas[i].name); free(st.schemas[i].type); free(st.schemas[i].data);
@@ -421,6 +572,9 @@ namespace probot::dashboard {
       st.fifoHead = st.fifoCount = 0; st.topics = 0;
       st.bytesUsed = st.writeBytes = st.dropped = 0;
       st.resync = false; st.ackHead = st.ackCount = 0; st.draining = 0;
+      st.persistUsed = false;
+      st.persistClearing = false;
+      g_persist = nullptr;
     }
 
   } // namespace detail
@@ -480,8 +634,10 @@ namespace probot::dashboard {
         }
       }
       if (!keep) st.bytesUsed -= bytes;
+      else if (flags & PERSISTENT) st.persistUsed = true;
     }
     if (!keep) { free(name); free(type); free(props); }
+    else if (flags & PERSISTENT) restore(st, id, path, vt, typeString);
     return id;
   }
 
@@ -491,21 +647,22 @@ namespace probot::dashboard {
     using namespace detail;
     Store& st = g_store;
     char *name = nullptr, *type = nullptr, *props = nullptr;
-    uint8_t *value = nullptr, *write = nullptr;
+    uint8_t *value = nullptr, *write = nullptr, *cand = nullptr, *tuned = nullptr;
     {
       core::MuxGuard g(st.mux);
       Slot* s = liveSlot(st, id);
       if (!s) return;
       name = s->name; type = s->type; props = s->props; value = s->value; write = s->write;
+      cand = s->cand; tuned = s->tuned;
       st.bytesUsed -= (uint32_t)(strlen(name) + strlen(type) + strlen(props) + 3) + s->cap;
-      if (s->writePending) { st.writeBytes -= s->writeLen; dropFromFifo(st, id & 0xFF); }
+      if (s->writePending) { st.writeBytes -= queuedBytes(*s); dropFromFifo(st, id & 0xFF); }
       uint8_t gen = s->gen;
       *s = Slot{};
       s->gen = gen;
       s->state = SLOT_REMOVING;
       --st.topics;
     }
-    free(name); free(type); free(props); free(value); free(write);
+    free(name); free(type); free(props); free(value); free(write); free(cand); free(tuned);
   }
 
   // Replaces the properties JSON and re-announces the topic.
@@ -538,11 +695,22 @@ namespace probot::dashboard {
   // Replaces the flags and re-announces the topic.
   inline bool setFlags(TopicId id, uint8_t flags) {
     using namespace detail;
-    core::MuxGuard g(g_store.mux);
-    Slot* s = liveSlot(g_store, id);
-    if (!s) return false;
-    s->flags = flags;
-    s->announced = false;
+    uint8_t *cand = nullptr, *tuned = nullptr;
+    {
+      core::MuxGuard g(g_store.mux);
+      Slot* s = liveSlot(g_store, id);
+      if (!s) return false;
+      s->flags = flags;
+      s->announced = false;
+      if (flags & PERSISTENT) {
+        g_store.persistUsed = true;
+      } else {                           // values not stored yet are dropped
+        cand = s->cand; tuned = s->tuned;
+        s->cand = s->tuned = nullptr; s->candLen = s->tunedLen = 0;
+        s->oversize = false;
+      }
+    }
+    free(cand); free(tuned);
     return true;
   }
 
@@ -558,8 +726,8 @@ namespace probot::dashboard {
       Slot* s = liveSlot(st, id);
       if (!s || len > st.lim.maxValue) return false;
       if (len <= s->cap) {
-        if (s->hasValue && !(s->flags & KEEP_DUPLICATES) && s->len == len &&
-            (len == 0 || memcmp(s->value, data, len) == 0)) return true;
+        bool same = s->hasValue && s->len == len && (len == 0 || memcmp(s->value, data, len) == 0);
+        if (same && !(s->flags & KEEP_DUPLICATES)) return true;
         if (len) memcpy(s->value, data, len);
         s->len = (uint32_t)len; s->hasValue = true; s->dirty = true;
         return true;
@@ -661,7 +829,7 @@ namespace probot::dashboard {
     }
     while (budget--) {
       Write w{};
-      uint8_t* data = nullptr;
+      uint8_t *data = nullptr, *accepted = nullptr;
       {
         core::MuxGuard g(st.mux);
         if (!st.fifoCount) break;
@@ -672,24 +840,104 @@ namespace probot::dashboard {
         if (s.state != SLOT_LIVE || !s.writePending) continue;
         data = s.write;
         w = Write{ makeId(idx, s.gen), (ValueType)s.vt, s.writeLen, data };
+        st.writeBytes -= queuedBytes(s);
         s.write = nullptr; s.writePending = false;
-        st.writeBytes -= s.writeLen;
+        s.restoreDelivered = s.restorePending;
+        s.dsDelivered = !s.restorePending;
+        s.restorePending = false;
         s.writeLen = 0;
+        if (s.cand) {                    // a newer write is drained: it was not refused
+          accepted = s.tuned;
+          s.tuned = s.cand; s.tunedLen = s.candLen;
+          s.cand = nullptr; s.candLen = 0;
+        }
       }
+      free(accepted);
       fn(w, ctx);
-      free(data);
       ++delivered;
-      core::MuxGuard g(st.mux);
-      if (Slot* s = liveSlot(st, w.id)) { if (s->hasValue) s->dirty = true; }
+      {
+        core::MuxGuard g(st.mux);
+        if (Slot* s = liveSlot(st, w.id)) {
+          if (s->hasValue) s->dirty = true;
+          // Not refused during fn: the candidate to store.
+          if ((s->flags & PERSISTENT) && s->dsDelivered) {
+            if (w.len <= kMaxPersistValue) {
+              s->cand = data; s->candLen = w.len; s->candFresh = true;
+              data = nullptr;
+            } else {
+              s->oversize = true;          // cannot be stored: reported, not kept
+            }
+          }
+        }
+      }
+      free(data);
     }
     __atomic_store_n(&st.draining, 0u, __ATOMIC_RELEASE);
     return delivered;
   }
 
   // Tells the Driver Station a drained write was not applied ('K' frame).
+  // Call it before another write for the topic is drained. For a restored
+  // PERSISTENT value no frame is sent, since the Driver Station did not
+  // write it: the stored value is erased instead. A refused Driver Station
+  // write to a PERSISTENT topic is not stored.
   inline void rejectWrite(TopicId id, uint8_t reason) {
-    core::MuxGuard g(detail::g_store.mux);
-    detail::pushAck(detail::g_store, id, (WriteStatus)reason);
+    using namespace detail;
+    uint8_t* drop = nullptr;
+    {
+      core::MuxGuard g(g_store.mux);
+      Slot* s = liveSlot(g_store, id);
+      if (s && s->restoreDelivered) {
+        s->restoreDelivered = false;
+        s->eraseStored = true;
+        return;
+      }
+      if (s && s->dsDelivered) {
+        s->dsDelivered = false;
+        s->oversize = false;
+        drop = s->cand; s->cand = nullptr; s->candLen = 0;
+      }
+      pushAck(g_store, id, (WriteStatus)reason);
+    }
+    free(drop);
+  }
+
+  // Erases every stored PERSISTENT value, and drops stored values still
+  // waiting for drainWrites() and Driver Station values not stored yet.
+  // Published topics keep their values; the next Driver Station write is
+  // stored again. Writes flash, so call it while the robot is stopped.
+  // False without storage or when the erase failed.
+  inline bool clearPersisted() {
+    using namespace detail;
+    const PersistBackend* be = __atomic_load_n(&g_persist, __ATOMIC_ACQUIRE);
+    if (!be) return false;
+    Store& st = g_store;
+    for (uint16_t i = 0;; ++i) {
+      uint8_t *drop = nullptr, *cand = nullptr, *tuned = nullptr;
+      {
+        core::MuxGuard g(st.mux);
+        if (!st.slots || i >= st.lim.maxTopics) break;
+        if (i == 0) { ++st.persistEpoch; st.persistClearing = true; }
+        Slot& s = st.slots[i];
+        // restoreDelivered stays: refusing that restore must not send 'K'.
+        s.eraseStored = s.dsDelivered = s.restoreFailed = s.oversize = false;
+        cand = s.cand; tuned = s.tuned;
+        s.cand = s.tuned = nullptr; s.candLen = s.tunedLen = 0;
+        if (s.restorePending) {
+          dropFromFifo(st, i);
+          drop = s.write;
+          s.write = nullptr; s.writeLen = 0; s.writePending = s.restorePending = false;
+        }
+      }
+      free(drop); free(cand); free(tuned);
+    }
+    // Values accepted while the walk ran are stored only after the erase.
+    bool ok = be->eraseAll();
+    {
+      core::MuxGuard g(st.mux);
+      st.persistClearing = false;
+    }
+    return ok;
   }
 
   inline Stats stats() {
@@ -697,5 +945,105 @@ namespace probot::dashboard {
     core::MuxGuard g(st.mux);
     return Stats{ st.topics, st.lim.maxTopics, st.bytesUsed, st.lim.poolBytes, st.dropped };
   }
+
+  namespace detail {
+
+    inline bool persistUsed() {
+      core::MuxGuard g(g_store.mux);
+      return g_store.persistUsed;
+    }
+
+    enum class PersistFailure : uint8_t { Store, Erase, Read };
+
+    // One pass of the persistence task: stores each accepted Driver Station
+    // value of a PERSISTENT topic and erases refused stored ones. A flash
+    // write stalls both cores, so nothing is written unless idle (the robot
+    // is not running an OpMode); edits made while running are stored after
+    // it stops. A candidate still open to refusal and a write still waiting
+    // for drainWrites() are not stored. rec and cur hold recordCapacity()
+    // bytes each. failed gets the path of a value that could not be stored
+    // or erased (not retried until the next Driver Station write) or whose
+    // stored value could not be read (reported once). Returns the flash
+    // operations attempted (an unchanged record is not rewritten).
+    inline size_t persistTick(uint32_t nowMs, bool idle, uint8_t* rec, uint8_t* cur, size_t cap,
+                              void (*failed)(const char* path, PersistFailure why)) {
+      Store& st = g_store;
+      const PersistBackend* be = __atomic_load_n(&g_persist, __ATOMIC_ACQUIRE);
+      if (!be) return 0;
+      enum Op { None, Report, TooLarge, Store, Erase };
+      size_t ops = 0;
+      for (uint16_t i = 0;; ++i) {
+        char key[kKeyLen];
+        char path[256];
+        size_t n = 0;
+        Op op = None;
+        uint8_t *drop = nullptr, *stored = nullptr;
+        uint32_t epoch;
+        {
+          core::MuxGuard g(st.mux);
+          if (!st.slots || i >= st.lim.maxTopics) break;
+          Slot& s = st.slots[i];
+          if (s.state == SLOT_LIVE && (s.flags & PERSISTENT)) {
+            if (s.candFresh) { s.candFresh = false; s.candSince = nowMs; }
+            if (s.cand && (uint32_t)(nowMs - s.candSince) >= kPersistDebounceMs) {
+              drop = s.tuned;                  // not refused in time: accepted
+              s.tuned = s.cand; s.tunedLen = s.candLen;
+              s.cand = nullptr; s.candLen = 0;
+            }
+            if (s.restoreFailed && !s.failReported) {
+              s.failReported = true;
+              op = Report;
+            } else if (s.oversize) {
+              s.oversize = false;
+              op = TooLarge;
+            } else if (idle && !st.persistClearing && !s.cand && !s.writePending) {
+              if (s.tuned) {
+                n = encodeRecord(s.name, s.vt, s.type, s.tuned, s.tunedLen, rec, cap);
+                stored = s.tuned;              // freed below; rec holds the copy
+                s.tuned = nullptr; s.tunedLen = 0;
+                s.eraseStored = false;         // the new value replaces the refused one
+                op = Store;
+              } else if (s.eraseStored) {
+                s.eraseStored = false;
+                op = Erase;
+              }
+            }
+            if (op != None) {
+              epoch = st.persistEpoch;
+              persistKey(s.hash, key);
+              memcpy(path, s.name, strlen(s.name) + 1);
+            }
+          }
+        }
+        free(drop); free(stored);
+        if (op == None) continue;
+        if (op == Report || op == TooLarge) {
+          if (failed) failed(path, op == Report ? PersistFailure::Read : PersistFailure::Store);
+          continue;
+        }
+        bool ok, wrote = false;
+        if (op == Erase) {
+          ok = be->erase(key);
+          ++ops;
+        } else if (n == 0) {
+          ok = false;                          // does not fit the record
+        } else if (be->load(key, cur, cap) == (long)n && memcmp(cur, rec, n) == 0) {
+          ok = true;
+        } else {
+          ok = wrote = be->save(key, rec, n);
+          ++ops;
+          bool cleared;
+          {
+            core::MuxGuard g(st.mux);
+            cleared = st.persistEpoch != epoch;
+          }
+          if (cleared && wrote) be->erase(key);   // clearPersisted() ran meanwhile
+        }
+        if (!ok && failed) failed(path, op == Erase ? PersistFailure::Erase : PersistFailure::Store);
+      }
+      return ops;
+    }
+
+  } // namespace detail
 
 } // namespace probot::dashboard

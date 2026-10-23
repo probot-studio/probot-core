@@ -10,6 +10,9 @@
 #include <probot/io/battery.hpp>
 #include <probot/framework.hpp>
 #include <probot/dashboard/dashboard.hpp>
+#ifdef ESP32
+#include <probot/dashboard/persist_nvs.hpp>
+#endif
 
 // Driver-station inactivity → STOP (1, default, safe) or just disconnect (0).
 #ifndef PROBOT_DS_TIMEOUT_MS
@@ -367,6 +370,9 @@ namespace probot {
         if (now - lastLed >= 500){
           lastLed = now;
           updateLed(estop);
+#ifdef ESP32
+          probot::dashboard::detail::nvs_store::startIfNeeded();
+#endif
         }
         vTaskDelay(pdMS_TO_TICKS(5));
       }
@@ -400,6 +406,10 @@ namespace probot {
     probot::dashboard::detail::configure({ PROBOT_DASH_MAX_TOPICS, PROBOT_DASH_MAX_SCHEMAS,
                                            PROBOT_DASH_MAX_VALUE, PROBOT_DASH_POOL_BYTES,
                                            PROBOT_DASH_WRITE_QUEUE, PROBOT_DASH_MAX_SCHEMA_BYTES });
+#ifdef ESP32
+    __atomic_store_n(&probot::dashboard::detail::g_persist, &probot::dashboard::detail::nvs_store::kBackend,
+                     __ATOMIC_RELEASE);
+#endif
     // Before the Driver Station starts: reserve() moves the records, which
     // restarts any reader from the oldest line.
     if (!probot::console::detail::reserve(PROBOT_CONSOLE_BYTES)) {
