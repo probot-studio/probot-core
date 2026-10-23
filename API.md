@@ -292,6 +292,10 @@ hook'u tamamlanmış evre için daima `phase` kullanılmalıdır.
 | `ds::packetSeq()` | Tek sayaç: her portun her DS joystick (`'J'`) paketinde (iki kumandayla her gönderimde iki kez) ve kabul edilen mod/OpMode/INIT/START/STOP komutunda artar (acil durdurma ve reboot isteğinde artmaz) |
 | `ds::rslState()` | Robot sinyal ışığı (RSL) şu an yanık mı: robot hareket edebilen RUN fazında yanıp söner, diğer durumlarda sürekli yanar. `PROBOT_RSL_PIN` bağlı olmasa da izlenir; çalışma zamanı başlamadan `false` |
 | `ds::commsDisableCount()` | Açılıştan beri DS bağlantısı koptuğu için etkin (START verilmiş) robotun kaç kez durdurulduğu (PB-E303). INIT sırasındaki kopma ve `PROBOT_DS_TIMEOUT_FORCE_STOP 0` iken kopma (PB-E304, yalnız joystick sıfırlanır) sayılmaz |
+| `ds::allianceStation()` | DS'te seçilen istasyon: `AllianceStation::Unknown` (seçilmedi), `Red1`..`Red3`, `Blue1`..`Blue3` (WPILib numaralarıyla 0-6) |
+| `ds::gameData(out, cap)` | Oyun verisini (UTF-8, en çok 64 bayt) `out`'a kopyalar, `cap > 0` ise NUL ile bitirir; tam uzunluğu `snprintf` gibi döner (`>= cap` ise kesildi). Yoksa `0` ve boş metin |
+| `ds::matchInfo()` | Tüm maç bilgisi (`MatchInfo`): `station`, `type` (`MatchType::None` / `Practice` / `Qualification` / `Elimination`), `matchNumber` (0-65535), `replayNumber` (0-255), `eventName`, `gameData` (NUL ile biten, en çok 64 bayt) |
+| `ds::matchInfoSeq()` | DS maç bilgisinin herhangi bir alanını her değiştirdiğinde değişir; açılıştan beri hiç değişmediyse `0` |
 | `ds::rawGamepad(port, out)` | Kapısız son joystick karesi, her fazda (`port` 0-5). Port yoksa ya da kare yoksa `false` |
 | `ds::systemTimeValid()` | Sistem saati (`time()`, `gettimeofday()`) gerçek zamanı tutuyor mu. Robotta pil destekli saat yok: DS sayfası bağlanınca tarayıcının saatini gönderir. İlk geçerli saat her zaman kurulur, sonrakiler yalnız robot durmuşken (STOPPED; otonom ile TeleOp arası sayılmaz), böylece maç sırasında saat atlamaz. O zamana dek `false`: güç verilince `time()` 1970'ten sayar; yazılımla yeniden başlatmada (DS'ten reboot, PB-E305, panic/watchdog) eski gerçek zamandan devam edebilir ama yine geçerli sayılmaz. Dosya adı ya da kayıt zamanı yazmadan önce bakın. Saat UTC'dir; yerel saat için sketch `setenv("TZ", "<+03>-3", 1); tzset();` çağırır |
 
@@ -300,6 +304,21 @@ verilmezse 0). Menü, otonom
 seçimi ve buton eşlemesi içindir; motor **sürmeyin**: aktüatör için kapılı
 `probot::io::gamepad()` / `joystick_api` kullanın. Kapısız veri de bağlantı
 kesilince `PROBOT_INPUT_TIMEOUT_MS` sonra sıfırlanır.
+
+**Maç bilgisi** (istasyon, oyun verisi, etkinlik adı, maç türü, maç ve
+tekrar numarası) Dashboard'daki "Maç Bilgisi" kartından girilir ve yalnız
+robot devre dışıyken değişir: STOPPED ya da otonom ile TeleOp arasındaki
+TRANSITION (bir sonraki INIT'e dek sürer), bekleyen komut ve acil durdurma
+yok. INIT ya da RUN fazında hiç değişmez; otonom ile TeleOp arasında
+değişebilir. INIT'te ya da döngüde `ds::matchInfoSeq()` değiştiyse
+yeniden okuyun. Bilgi yalnız RAM'de tutulur ve yeniden başlatmada silinir;
+açık kalan sayfa, robotta bilgi yokken (`msq` 0) son gördüğü değerleri
+aynı robota (aynı SSID) yeniden gönderir. Sayfa değerleri saklamaz:
+yeniden yüklenen sayfa ya da başka bir robotun ağına geçen sayfa
+göndermez. Metin
+alanları UTF-8, en çok 64 bayt ve kontrol karakteri içeremez.
+`PROBOT_HAS_DS_MATCH_INFO` bu fonksiyonların varlığını derleme anında
+bildirir.
 
 ### Batarya okumaları
 
@@ -505,8 +524,8 @@ değildir. Saha boyutu ve görseli yayımlanmaz: görünüm pozlara göre büyü
 `backgroundColor`, `.type` taşımayan ve `position` [x, y] taşıyan kökler,
 `.type` = `line` olan iç içe `angle`, `length`, `color`, `weight` kolları)
 çizilir. Beklenen alt topic'ler eksik ya da tipi yanlışsa klasör düz ağaç
-olarak gösterilir. Metin kutularına boşluk yalnız robot STOPPED iken
-yazılır; diğer fazlarda Space yine acil
+olarak gösterilir. Metin kutularına boşluk yalnız robot devre dışıyken
+(STOPPED ya da TRANSITION) yazılır; diğer fazlarda Space yine acil
 durdurmadır. Protokol aşağıda ("WS çerçeveleri").
 
 ```cpp
@@ -656,7 +675,7 @@ zamanı · **E4xx** protokol/HTTP (E409, HTTP 409'un karşılığıdır).
 | PB-E306 | Çalışma | Batarya sensörüne (INA219/INA226) I2C'de ulaşılamıyor — arayüz "Veri yok"a düşer, bağlantı/adres kontrol edin |
 | PB-E307 | Çalışma | Açılışta `PROBOT_CONSOLE_BYTES` için bellek yok: konsol mesajda yazan boyutta bir tamponla çalışır (açılıştan önce yazılan satırlar için alınmış 4096 bayt ya da 2048); 0 ise konsol satırları düşer. Değeri küçültün |
 | PB-E308 | Çalışma | Dashboard `PERSISTENT` değeri flash'ta (NVS) saklanamadı: yazılamadı (alan dolu, flash hatası ya da değer 2048 bayttan büyük; DS yeni bir değer yazana dek yeniden denenmez), silinemedi, kayıt okunamadı (kayıt korunur, bir kez bildirilir; DS'ten yeni değer yazılınca üstüne yazılır) ya da kayıt için bellek ayrılamadı (saklama yeniden başlatılana dek kapalı). Kalıcı değerleri küçültün ya da `clearPersisted()` çağırın; bellek hatasında belleği azaltın (örneğin daha küçük `PROBOT_DASH_MAX_VALUE`) ve robotu yeniden başlatın |
-| PB-E409 | HTTP | Komut geçersiz evrede (409) — `mode`/`init`/`start`/`stop` evre kuralları; `/files` ve `/files/get` robot boşta değilken ya da acil durdurmadan sonra |
+| PB-E409 | HTTP | Komut geçersiz evrede (409) - `mode`/`init`/`start`/`stop` evre kuralları; `/files`, `/files/get` ve `POST /match` robot boşta (STOPPED/TRANSITION, bekleyen komut yok) değilken ya da acil durdurmadan sonra |
 
 ## Acil durdurma
 
@@ -707,6 +726,8 @@ yazacaksanız:
 | `/robotControl?cmd=mode&val=auto\|teleop\|utility` | GET | gerekli | STOPPED/TRANSITION'da modu (ve o modun tercih edilen OpMode seçeneğini) seçer; INIT/RUN'da 409. `utility` yalnız `util` true iken |
 | `/robotControl?cmd=opmode&id=N` | GET | gerekli | Listelenmiş bir OpMode seçeneğini (ve modunu) seçer; `id` ondalık metin. Listede yoksa 400, INIT/RUN'da 409 |
 | `/opmodes` | GET | gerekli | `{"options":[{"id":"101","mode":"auto","name":"Sol","group":"Otonom","description":"..."}]}`. `id` 64 bitlik olabildiği için metindir. Liste hiç verilmediyse `{"options":[]}`. Liste değişince `omv` artar; yanıt sırasında değişirse bağlantı kapanır, yeniden isteyin |
+| `/match` | GET | gerekli | `{"seq":N,"station":0-6,"type":0-3,"match":N,"replay":N,"event":"...","gd":"..."}`: maç bilgisi. `seq` = `msq` (`ds::matchInfoSeq()`); `station` ve `type` WPILib numaralarıyla (0 = yok) |
+| `/match` | POST | gerekli | Gövde `application/x-www-form-urlencoded`: `station`, `type`, `match`, `replay` ondalık; `event`, `gd` `encodeURIComponent` ile kodlanmış (`+` boşluk sayılmaz). Olmayan alan korunur; bilinmeyen alan ve `=` içermeyen parça yok sayılır. Geçersiz değer, 64 bayttan uzun, geçersiz UTF-8 ya da kontrol karakterli metin 400 (hiçbir alan değişmez); robot boşta (STOPPED/TRANSITION, bekleyen komut yok) değilse ya da acil durdurmadan sonra 409. Başarıda GET'in yanıtını döner |
 | `/files` | GET | gerekli | `{"shares":[{"name":"logs","ok":true,"truncated":false,"files":[{"name":"a.wpilog","size":N,"mtime":T}]}]}`. `mtime` Unix saniye, bilinmiyorsa `0`; `ok` false = klasör açılamadı. Paylaşılan klasör yoksa her istemciye ve her evrede 404; robot boşta değilse 409 |
 | `/files/get?share=S&name=N` | GET | gerekli | Dosyanın içeriği (`application/octet-stream`, chunked). `name` `encodeURIComponent` ile kodlanır; `/`, `\`, `.` ve `..` reddedilir (400). Yoksa 404, robot boşta değilse 409, başka indirme sürerken 503 |
 | `/robotControl?cmd=init&autoLen=N` | GET | gerekli | Seçili modu INIT'e alır; yalnız STOPPED/TRANSITION |
@@ -715,7 +736,7 @@ yazacaksanız:
 | `/robotControl?cmd=estop` | GET | gerekli | **Acil durdurma**: kullanıcı task'ı öldürülür, aktif `stop()` watchdog'lu (`PROBOT_ESTOP_END_MS`) çalışır, enable pini kesilir, robot reboot'a kadar kilitlenir |
 | `/robotControl?cmd=reboot` | GET | gerekli | Çipi yeniden başlatır (`ESP.restart()`) — estop kilidini temizlemenin yolu |
 | `/setChannel?ch=N` | GET | gerekli | Kanalı NVS'e kaydet; 1-13 ise CSA ile **canlı** geçiş (zaten o kanaldaysa `live:false`), `0` = kaydı temizle, açılışta firmware varsayılanına dön. Dönüş: `{"ok":b,"ch":N,"live":b}` |
-| `/getState` | GET | gerekli | `{"status":N,"phase":N,"selectedMode":"auto|teleop|utility","autoPeriodSeconds":N,"autoRemainingMs":N,"batt":V.V,"estop":b,"opMode":"N","omv":N,"util":b}` (WS yokken fallback). `opMode`: seçili OpMode seçeneği (`"0"` = yok), `omv`: OpMode listesinin sürüm sayacı, `util`: Utility seçilebilir. `batt`: pil gerilimi (bölücü/INA otomatik ya da `setBatteryVoltage()` elle), `0.0` = veri yok |
+| `/getState` | GET | gerekli | `{"status":N,"phase":N,"selectedMode":"auto|teleop|utility","autoPeriodSeconds":N,"autoRemainingMs":N,"batt":V.V,"estop":b,"opMode":"N","omv":N,"util":b,"msq":N}` (WS yokken fallback). `opMode`: seçili OpMode seçeneği (`"0"` = yok), `omv`: OpMode listesinin sürüm sayacı, `util`: Utility seçilebilir, `msq`: maç bilgisinin değişiklik sayacı (değişince `/match`'i yeniden okuyun). `batt`: pil gerilimi (bölücü/INA otomatik ya da `setBatteryVoltage()` elle), `0.0` = veri yok |
 | `/telemetry` | GET | gerekli | Telemetri tamponunun içeriği (text) (WS yokken fallback) |
 | `/getBattery` | GET | serbest | Pil gerilimi (kaynak: `PROBOT_BATTERY_ADC_PIN` bölücü, `PROBOT_BATTERY_INA` sensörü ya da elle `probot::setBatteryVoltage()`) |
 | `/health` | GET | serbest | `{"rssi":N,"up":ms,"heap":N,"dm":b,"joyAgeMs":N,"sta":N,"disc":N,"dashTopics":N,"dashBytes":N,"dashDropped":N,"loopMs":N,"overruns":N}`: izleme/hakem için. `joyAgeMs`: son joystick paketinin yaşı (-1 = hiç gelmedi), `sta`: bağlı istemci sayısı, `disc`: son kopuşun IEEE reason kodu, `dash*`: dashboard topic sayısı, kullanılan bayt, düşürülen yazma/değer, `loopMs`: loop periyodu, `overruns`: periyodunu aşan tur sayısı |

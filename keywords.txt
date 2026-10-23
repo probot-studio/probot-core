@@ -9,6 +9,9 @@ probot	KEYWORD1
 Joystick	KEYWORD1
 Servo	KEYWORD1
 GamepadService	KEYWORD1
+AllianceStation	KEYWORD1
+MatchInfo	KEYWORD1
+MatchType	KEYWORD1
 StateService	KEYWORD1
 OpModeOption	KEYWORD1
 
@@ -85,6 +88,10 @@ packetSeq	KEYWORD2
 systemTimeValid	KEYWORD2
 rslState	KEYWORD2
 commsDisableCount	KEYWORD2
+allianceStation	KEYWORD2
+gameData	KEYWORD2
+matchInfo	KEYWORD2
+matchInfoSeq	KEYWORD2
 requestStop	KEYWORD2
 currentAmps	KEYWORD2
 setLowVoltage	KEYWORD2

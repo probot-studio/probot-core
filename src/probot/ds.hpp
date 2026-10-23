@@ -4,6 +4,7 @@
 #include <probot/core/lifecycle.hpp>
 #include <probot/core/wall_clock.hpp>
 #include <probot/io/gamepad.hpp>
+#include <probot/robot/match_info.hpp>
 #include <probot/robot/opmodes.hpp>
 #include <probot/robot/state.hpp>
 
@@ -12,6 +13,9 @@
 
 namespace probot::ds {
 
+  using robot::AllianceStation;
+  using robot::MatchInfo;
+  using robot::MatchType;
   using robot::OpMode;
   using robot::OpModeOption;
   using robot::Phase;
@@ -129,6 +133,37 @@ namespace probot::ds {
   // not counted.
   inline uint32_t commsDisableCount() {
     return __atomic_load_n(&robot::g_comms_disable_count, __ATOMIC_SEQ_CST);
+  }
+
+  // Match information the Driver Station sets while the robot is stopped.
+  // Empty (Unknown station, no game data) until it is set; a reboot clears
+  // it until the page sends it again.
+  inline AllianceStation allianceStation() {
+    return robot::matchStore().read().station;
+  }
+
+  // Copies the game data (UTF-8, at most MatchInfo::kMaxText bytes) into
+  // out, NUL-terminated when cap > 0, and returns its full length like
+  // snprintf: a result >= cap means it was cut.
+  inline size_t gameData(char* out, size_t cap) {
+    MatchInfo m = robot::matchStore().read();
+    size_t len = strlen(m.gameData);
+    if (cap) {
+      size_t n = len < cap ? len : cap - 1;
+      memcpy(out, m.gameData, n);
+      out[n] = '\0';
+    }
+    return len;
+  }
+
+  inline MatchInfo matchInfo() {
+    return robot::matchStore().read();
+  }
+
+  // Changes whenever the Driver Station changes any match field; 0 until
+  // the first change since boot.
+  inline uint32_t matchInfoSeq() {
+    return robot::matchStore().seq();
   }
 
   // Ungated controller input in any phase (see io::rawGamepad()). Returns

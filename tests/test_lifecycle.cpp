@@ -156,6 +156,16 @@ TEST_CASE(command_acceptance_closes_status_phase_gap){
   EXPECT_TRUE(core::canAcceptModeChange(Phase::TRANSITION, Status::STOP));
   EXPECT_TRUE(!core::canAcceptModeChange(Phase::TRANSITION, Status::INIT));
   EXPECT_TRUE(!core::canAcceptModeChange(Phase::TELEOP_RUN, Status::START));
+  // Match info: STOPPED or TRANSITION with nothing pending, never after an e-stop
+  EXPECT_TRUE(core::canChangeMatchInfo(Phase::STOPPED, Status::STOP, false));
+  EXPECT_TRUE(core::canChangeMatchInfo(Phase::TRANSITION, Status::STOP, false));   // lasts until the next INIT
+  EXPECT_TRUE(!core::canChangeMatchInfo(Phase::STOPPED, Status::STOP, true));
+  EXPECT_TRUE(!core::canChangeMatchInfo(Phase::TRANSITION, Status::STOP, true));
+  EXPECT_TRUE(!core::canChangeMatchInfo(Phase::STOPPED, Status::INIT, false));
+  EXPECT_TRUE(!core::canChangeMatchInfo(Phase::TRANSITION, Status::INIT, false));
+  EXPECT_TRUE(!core::canChangeMatchInfo(Phase::AUTO_INIT, Status::INIT, false));
+  EXPECT_TRUE(!core::canChangeMatchInfo(Phase::TELEOP_RUN, Status::START, false));
+  EXPECT_TRUE(!core::canChangeMatchInfo(Phase::AUTO_RUN, Status::STOP, false));   // stop pending
   // STOP: in INIT/RUN, or while an accepted INIT/START is still pending
   EXPECT_TRUE(core::canAcceptStop(Phase::AUTO_INIT, Status::INIT));
   EXPECT_TRUE(core::canAcceptStop(Phase::TELEOP_RUN, Status::START));
