@@ -176,6 +176,12 @@ Biçim [Keep a Changelog](https://keepachangelog.com/), sürümler
   Dashboard, hidden while no such topic exists. No protocol change.
 
 ### Changed
+- `getOptions()` now reads the centre Home/Guide/PS button (W3C standard
+  button 16) in the `logitech-f310` (default), `standard` (also `xbox`,
+  `ds4`, `ps`) and `axis9-dpad` profiles, where it was always `false`. The
+  operating system, Steam or the browser may take that button for itself;
+  a gamepad that reports fewer than 17 buttons still reads `false`. The
+  Driver Station joystick page labels that button "Home" (was "P17").
 - Dashboard schemas have their own size limit, `PROBOT_DASH_MAX_SCHEMA_BYTES`
   (default 4096, 16-32768, PB-E108), still counted in
   `PROBOT_DASH_POOL_BYTES`. They used to be limited by
