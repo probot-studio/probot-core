@@ -15,7 +15,7 @@ struct MappingProfile {
   int A, B, X, Y;
   int LB, RB;
   int LT, RT;        // triggers as buttons (bool)
-  int Back, Start, Options;
+  int Back, Start, Options;   // Options: the centre Home/Guide/PS button (standard index 16)
   int LStick, RStick;
   // D-Pad
   bool dpadFromAxis; int dpadAxis; // if true, use axis as POV-like; else below buttons
@@ -26,7 +26,7 @@ inline const MappingProfile& mapping_logitech_f310(){
   static MappingProfile m{
     /*name*/        "logitech-f310",
     /*axes*/        0,1, 2,3, /*invert*/ true, true,
-    /*buttons*/     0,1,2,3, 4,5, 6,7, 8,9,-1, 10,11,
+    /*buttons*/     0,1,2,3, 4,5, 6,7, 8,9,16, 10,11,
     /*dpad axis?*/  false, -1,
     /*dpad btns*/   12,13,14,15
   };
@@ -38,7 +38,7 @@ inline const MappingProfile& mapping_standard(){
   static MappingProfile m{
     "standard",
     0,1, 2,3, true, true,
-    0,1,2,3, 4,5, 6,7, 8,9,-1, 10,11,
+    0,1,2,3, 4,5, 6,7, 8,9,16, 10,11,
     false, -1,
     12,13,14,15
   };
@@ -50,7 +50,7 @@ inline const MappingProfile& mapping_axis9_dpad(){
   static MappingProfile m{
     "axis9-dpad",
     0,1, 2,3, true, true,
-    0,1,2,3, 4,5, 6,7, 8,9,-1, 10,11,
+    0,1,2,3, 4,5, 6,7, 8,9,16, 10,11,
     true, 9,
     -1,-1,-1,-1
   };

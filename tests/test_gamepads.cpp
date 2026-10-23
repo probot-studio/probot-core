@@ -204,3 +204,30 @@ TEST_CASE(gamepad_name_is_reported_while_frames_arrive){
   EXPECT_TRUE(!js.getName(name, sizeof name));
   _test_millis_now = 0;
 }
+
+TEST_CASE(options_is_the_home_button_in_the_standard_profiles){
+  resetPads();
+  _test_millis_now = 20;
+  const mapping::MappingProfile* profiles[] = {
+    &mapping::mapping_logitech_f310(), &mapping::mapping_standard(), &mapping::mapping_axis9_dpad(),
+  };
+  for (const auto* m : profiles) {
+    mapping::setActive(m);
+    auto js = io::joystick_api::makeDefault();
+    bool bt[17] = {};
+    bt[16] = true;
+    io::detail::applyFrame(0, 20, true, nullptr, 0, bt, 17);
+    EXPECT_TRUE(js.getOptions() && !js.getBack() && !js.getStart());
+    bt[16] = false;
+    io::detail::applyFrame(0, 20, true, nullptr, 0, bt, 17);
+    EXPECT_TRUE(!js.getOptions());
+    // A pad without a Home button (16 buttons) never reads it.
+    bool pad16[16] = {};
+    io::detail::applyFrame(0, 20, true, nullptr, 0, pad16, 16);
+    EXPECT_TRUE(!js.getOptions());
+  }
+  EXPECT_TRUE(mapping::findByName("xbox")->Options == 16 && mapping::findByName("ps")->Options == 16);
+  EXPECT_TRUE(mapping::mapping_tuna_default().Options == 10);
+  mapping::setActive(&mapping::mapping_logitech_f310());
+  _test_millis_now = 0;
+}

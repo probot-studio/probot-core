@@ -109,7 +109,7 @@ her seferinde çağırmak normaldir.
 | `getA()`, `getB()`, `getX()`, `getY()` | `bool` | Xbox isimleri |
 | `getCross()`, `getCircle()`, `getSquare()`, `getTriangle()` | `bool` | PlayStation eşdeğerleri |
 | `getLB()`, `getRB()` | `bool` | Omuz butonları |
-| `getBack()`, `getStart()`, `getOptions()` | `bool` | Orta butonlar (`getOptions` yalnız `tuna-default` eşlemesinde tanımlı) |
+| `getBack()`, `getStart()`, `getOptions()` | `bool` | Orta butonlar. `getOptions` ortadaki Home/Guide/PS butonudur (standart düzende 16; `tuna-default`'ta 10); PlayStation kumandada "Options" yazan tuş `getStart()`, "Share"/"Create" `getBack()`'tir. İşletim sistemi, Steam ya da tarayıcı bu butonu kendisi kullanabilir, o zaman sayfaya hiç ulaşmaz; 17'den az buton bildiren kumandada her zaman `false` |
 | `getLeftStickButton()`, `getRightStickButton()` | `bool` | Çubuğa basma (L3/R3) |
 | `getPOV()` | `int` | D-Pad: -1 yok, 0 yukarı, 90 sağ, 180 aşağı, 270 sol. D-Pad'i butondan okuyan eşlemelerde (`logitech-f310`, `standard`) çaprazlar da (45, 135, 225, 315) ve zıt yönler birbirini siler; `axis9-dpad` ve `tuna-default` eksen 9'dan 4 yön okur |
 | `getDpadUp()/Right()/Down()/Left()` | `bool` | D-Pad yönü; çaprazda iki yön birden `true` (yukarı+sağ: `getDpadUp()` ve `getDpadRight()`) |
