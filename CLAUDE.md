@@ -27,8 +27,10 @@ follow from that:
 
 ## Supported targets
 
-- Official target: **ESP32-S3** (`FQBN esp32:esp32:esp32s3`, flags `-DESP32S3
-  -DARDUINO_USB_MODE=1`). Other ESP32 variants are not officially supported.
+- Official target: **ESP32-S3** (flags `-DESP32S3 -DARDUINO_USB_MODE=1`). The
+  recommended board is the Boardoza Pulse S32-S3; `make build` uses its settings
+  (`FQBN esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=huge_app,PSRAM=enabled,CDCOnBoot=cdc`, README "Board settings"), and CI also builds one example
+  for the generic `esp32:esp32:esp32s3`. Other ESP32 variants are not officially supported.
 - Arduino-ESP32 core **3.x** (`idf_component.yml`: `espressif/arduino-esp32 >= 3.0.0`,
   ESP-IDF `>= 5.0`).
 - Arduino IDE / `arduino-cli` (library metadata in `library.properties`), PlatformIO
@@ -105,7 +107,7 @@ Adafruit NeoPixel; the ESP32 core must be installed).
 | Command | What it does |
 |---|---|
 | `make list` | List examples |
-| `make build EXAMPLE=JoystickTest` | Build one example for `esp32:esp32:esp32s3` with `--warnings all` (also runs `sync_version.py`); `EXAMPLE=all` builds every example |
+| `make build EXAMPLE=JoystickTest` | Build one example with the Pulse FQBN (`FQBN=...` overrides) and `--warnings all` (also runs `sync_version.py`); `EXAMPLE=all` builds every example |
 | `make upload EXAMPLE=JoystickTest PORT=/dev/ttyACM0` | Build and flash (needs hardware) |
 | `make serial` | Serial monitor at 115200 baud |
 | `make tests/control_tests && ./tests/control_tests` | Host unit tests, no hardware (`g++ -std=c++17 -Wall -Wextra -pedantic` with the test defines and stubs) |
@@ -117,8 +119,8 @@ Adafruit NeoPixel; the ESP32 core must be installed).
 CI (`.github/workflows/ci.yml`) runs on pushes to `stable`, `dev`, `dev-*` and on PRs to
 `stable` and `dev`: it installs arduino-cli 1.3.1 and the esp32 core, installs Adafruit
 NeoPixel, checks that `index_html_gz.h` matches `ui/index.html` (`python3 tools/gen_ui.py
---check`), then runs `make build EXAMPLE=all`, `make tests/control_tests` and
-`./tests/control_tests`. Run the same commands locally before opening a PR.
+--check`), then runs `make build EXAMPLE=all`, a generic-board build of `JoystickTest`
+(`FQBN=esp32:esp32:esp32s3`), `make tests/control_tests` and `./tests/control_tests`. Run the same commands locally before opening a PR.
 
 Tests use a small custom harness (`tests/test_harness.hpp`: `TEST_CASE(...)`,
 `EXPECT_TRUE`...); every `tests/*.cpp` is compiled into one binary. Add new test files under

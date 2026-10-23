@@ -1,7 +1,8 @@
 # Unified Makefile for building examples with arduino-cli
 
 # Board/toolchain
-FQBN        ?= esp32:esp32:esp32s3
+# Boardoza Pulse S32-S3 settings (see README "Board settings")
+FQBN        ?= esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=huge_app,PSRAM=enabled,CDCOnBoot=cdc
 PORT        ?= /dev/ttyACM0
 BAUD        ?= 115200
 ARDUINO_CLI ?= arduino-cli

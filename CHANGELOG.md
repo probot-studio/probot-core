@@ -220,6 +220,11 @@ Biçim [Keep a Changelog](https://keepachangelog.com/), sürümler
   again lets a stalled port hold the sysloop, which also runs the
   emergency stop, for seconds. A Driver Station timeout now stops the
   robot and closes the connection before it logs.
+- The README lists the Tools settings and pins of the recommended
+  Boardoza Pulse S32-S3 board (USB CDC On Boot Enabled sends `Serial` to
+  the USB-C port), and `make build` uses them by default
+  (`FQBN=esp32:esp32:esp32s3:FlashSize=4M,PartitionScheme=huge_app,PSRAM=enabled,CDCOnBoot=cdc`).
+  CI also builds one example for the generic `esp32:esp32:esp32s3`.
 
 ## [0.4.0] — Probot Studio Uyumu — 2026-07-17
 
