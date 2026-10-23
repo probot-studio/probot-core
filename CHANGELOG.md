@@ -202,6 +202,14 @@ Biçim [Keep a Changelog](https://keepachangelog.com/), sürümler
   frame; it used to read about 0 while the robot was disabled.
   `GamepadService::lastWriteMs()` is now `lastFrameMs()` with the same
   meaning (the old name remains as an alias).
+- With USB CDC On Boot enabled on Arduino-ESP32 3.3.9 or later, a
+  `Serial` write gives up after about 100 ms instead of about 2 s while a
+  host keeps the port open without reading (`HWCDCSerial.setTxTimeoutMs(5)`
+  in `runtime_setup()`; text that does not fit is dropped). Older cores
+  already stop waiting after one timeout. A sketch that raises the timeout
+  again lets a stalled port hold the sysloop, which also runs the
+  emergency stop, for seconds. A Driver Station timeout now stops the
+  robot and closes the connection before it logs.
 
 ## [0.4.0] — Probot Studio Uyumu — 2026-07-17
 

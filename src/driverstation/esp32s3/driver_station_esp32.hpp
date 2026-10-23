@@ -336,8 +336,8 @@ namespace probot::driverstation::esp32 {
       }
     }
 
+    // Called from the sysloop: act first, then log (a Serial write can block).
     void forceDisconnect(uint32_t now_ms){
-      Serial.println("[DS   ] Force disconnect: connection timeout");
       char prev[sizeof(_owner_str)] = {0};
       bool released = false;
       portENTER_CRITICAL(&_owner_mux);
@@ -347,11 +347,10 @@ namespace probot::driverstation::esp32 {
         released = true;
       }
       portEXIT_CRITICAL(&_owner_mux);
-      if (released){
-        Serial.printf("[DS   ] Owner released: %s\n", prev);
-        onOwnerReleased(now_ms);
-      }
+      if (released) onOwnerReleased(now_ms);
       _ws.closeAll();
+      Serial.println("[DS   ] Force disconnect: connection timeout");
+      if (released) Serial.printf("[DS   ] Owner released: %s\n", prev);
       Serial.println("[DS   ] WS connections closed");
     }
 
