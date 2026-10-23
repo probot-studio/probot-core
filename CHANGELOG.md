@@ -158,6 +158,16 @@ Biçim [Keep a Changelog](https://keepachangelog.com/), sürümler
   Values up to 2048 bytes. `rejectWrite()` on a restored value erases it;
   `clearPersisted()` erases all. PB-E308 when a value cannot be stored,
   erased or read. `PROBOT_HAS_DASH_PERSIST` marks the feature.
+- Match information from the Driver Station: a "Maç Bilgisi" card on the
+  Dashboard sets the alliance station, game data, event name, match type,
+  match and replay number while the robot is disabled (STOPPED, or
+  between autonomous and TeleOp). Robot code reads them
+  with `probot::ds::allianceStation()`, `gameData()`, `matchInfo()` and the
+  change counter `matchInfoSeq()`; `PROBOT_HAS_DS_MATCH_INFO` marks the
+  feature. The values are kept in RAM; an open page sends the values it
+  last saw again after that robot (same SSID) reboots. New endpoint `/match`
+  (GET, and POST with a form body); the `'S'` frame and `/getState` gain
+  `msq`.
 
 ### Changed
 - Dashboard schemas have their own size limit, `PROBOT_DASH_MAX_SCHEMA_BYTES`

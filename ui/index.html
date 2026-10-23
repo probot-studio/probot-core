@@ -135,6 +135,9 @@
     .dash{
       display:grid;gap:11px;
       grid-template-columns:repeat(12,minmax(0,1fr));
+      /* Telemetry spans rows 2-3: its extra height goes to row 3, not between
+         Match Control and Match Info. */
+      grid-template-rows:auto auto 1fr;
       align-items:start;
     }
     .w-status,.w-battery,.w-signal{align-self:stretch;} /* row1 üçlüsü aynı boyda dursun */
@@ -281,6 +284,18 @@
 
     .mc-bottom{padding-top:10px;border-top:1px dashed rgba(217,48,37,0.35);}
     .estop-note{display:block;text-align:center;font-size:0.64rem;font-weight:700;color:var(--muted);letter-spacing:0.03em;margin-top:6px;}
+
+    /* --- MATCH INFO (station, game data; editable only while STOPPED) --- */
+    .mt-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;}
+    .mt-f{display:flex;flex-direction:column;gap:4px;min-width:0;}
+    .mt-f label{font-size:0.62rem;font-weight:800;letter-spacing:0.07em;text-transform:uppercase;color:var(--muted);}
+    .mt-f input{width:100%;min-width:0;padding:9px 11px;border-radius:8px;border:1px solid var(--line);background:#fff;
+      font:700 0.88rem var(--font);color:var(--ink);}
+    .mt-f input:focus{outline:none;border-color:var(--amber);box-shadow:0 0 0 3px rgba(255,176,32,0.25);}
+    .mt-f input:disabled,.mt-f select:disabled{background:var(--soft);color:var(--muted);cursor:not-allowed;}
+    .w-match.mt-red #mt-station{border-left:5px solid var(--stop);}
+    .w-match.mt-blue #mt-station{border-left:5px solid #1f6feb;}
+    .mt-note{margin-top:8px;font-size:0.68rem;font-weight:700;color:var(--muted);letter-spacing:0.03em;}
 
     /* --- TELEMETRY (açık "defter" — I/W/E seviye renkleri) --- */
     .w-tele{min-height:0;}
@@ -614,7 +629,7 @@
       .dash .widget{grid-column:1 / -1 !important;grid-row:auto !important;}
       /* dikeyde öncelik: faz + kontroller üstte, durum ortada, telemetri altta */
       .w-phase{order:1;} .w-control{order:2;} .w-status{order:3;}
-      .w-battery{order:4;} .w-signal{order:5;} .w-tele{order:6;}
+      .w-battery{order:4;} .w-signal{order:5;} .w-tele{order:6;} .w-match{order:7;}
       .w-tele .console{flex:none;height:240px;min-height:0;}
       .jgrid{grid-template-columns:1fr;}
       .jgrid .widget{grid-column:1 / -1 !important;}
@@ -640,6 +655,7 @@
       .mc-top{flex-direction:column;align-items:flex-start;gap:10px;}
       .match-clock{align-self:stretch;}
       .kv-grid{grid-template-columns:1fr;}
+      .mt-grid{grid-template-columns:1fr 1fr;}
     }
     @media(max-width:460px){
       .toolchip{display:none;}
@@ -654,7 +670,7 @@
       .app-header{padding:4px 14px;gap:10px;}
       .toolchip,.conn-ping,.conn-heap{display:none;}
       main{padding:10px 12px;}
-      .dash{grid-template-columns:repeat(12,minmax(0,1fr));gap:8px;min-height:0;}
+      .dash{grid-template-columns:repeat(12,minmax(0,1fr));grid-template-rows:none;gap:8px;min-height:0;}
       .dash .widget{grid-row:auto !important;}
       .widget{padding:9px;border-radius:8px;}
       .w-head{margin-bottom:6px;font-size:0.6rem;}
@@ -672,6 +688,7 @@
       .gauge,.gauge svg{width:84px;height:48px;}
       .gauge .read{font-size:0.95rem;}
       .dash .w-tele{order:0;grid-column:7 / span 6 !important;grid-row:3 !important;}
+      .dash .w-match{order:0;grid-column:1 / -1 !important;grid-row:4 !important;} /* set before driving: below everything */
       .console{height:120px;height:max(110px, calc(100vh - 336px));min-height:0;flex:none;}
       .mc-top{padding:8px 12px;}
       .phase-badge{font-size:1.2rem;}
@@ -832,6 +849,33 @@
               </div>
             </div>
             <div class="console" id="telemetry"></div>
+          </div>
+
+          <!-- MATCH INFO (robot code reads it with ds::allianceStation() / gameData()) -->
+          <div class="widget w-match" data-w="matchInfo">
+            <div class="w-head">Maç Bilgisi</div>
+            <div class="mt-grid">
+              <div class="mt-f"><label for="mt-station">İstasyon</label>
+                <select id="mt-station" disabled>
+                  <option value="0">Yok</option>
+                  <option value="1">Kırmızı 1</option><option value="2">Kırmızı 2</option><option value="3">Kırmızı 3</option>
+                  <option value="4">Mavi 1</option><option value="5">Mavi 2</option><option value="6">Mavi 3</option>
+                </select></div>
+              <div class="mt-f"><label for="mt-gd">Oyun verisi</label>
+                <input id="mt-gd" type="text" maxlength="64" autocomplete="off" spellcheck="false" disabled></div>
+              <div class="mt-f"><label for="mt-type">Maç türü</label>
+                <select id="mt-type" disabled>
+                  <option value="0">Yok</option><option value="1">Antrenman</option>
+                  <option value="2">Sıralama</option><option value="3">Eleme</option>
+                </select></div>
+              <div class="mt-f"><label for="mt-event">Etkinlik</label>
+                <input id="mt-event" type="text" maxlength="64" autocomplete="off" disabled></div>
+              <div class="mt-f"><label for="mt-match">Maç no</label>
+                <input id="mt-match" type="number" min="0" max="65535" step="1" disabled></div>
+              <div class="mt-f"><label for="mt-replay">Tekrar no</label>
+                <input id="mt-replay" type="number" min="0" max="255" step="1" disabled></div>
+            </div>
+            <div class="mt-note" id="mtNote">Robot dururken değiştirilebilir.</div>
           </div>
 
         </div>
@@ -1099,7 +1143,8 @@
     statusStrip : { col:7,  span:2, row:1 },
     battery     : { col:9,  span:2, row:1 },
     signal      : { col:11, span:2, row:1 },
-    telemetry   : { col:7,  span:6, row:2 }
+    telemetry   : { col:7,  span:6, row:2, rowSpan:2 },
+    matchInfo   : { col:1,  span:6, row:3 }
   };
   function applyLayout(){
     Object.keys(LAYOUT).forEach(function(key){
@@ -1416,6 +1461,7 @@
     if(typeof data.opMode==='string') omSel=data.opMode;
     utilAvail=data.util===true;
     if(typeof data.omv==='number'&&data.omv!==omVer) omFetch(data.omv);
+    if(typeof data.msq==='number'&&data.msq!==mtSeq) mtFetch();
 
     if(currentPhase!==prevPhase){
       evlog('info','Phase: '+(PHASE_EVENT[currentPhase]||currentPhase));
@@ -1477,6 +1523,8 @@
     var inRun=phRun(currentPhase);
     var modeUnlocked=(currentPhase===0||currentPhase===5);
     var modeSelectable=modeUnlocked&&currentStatus===2; // firmware: mode yalnız STOP'ta
+    mtIdle=modeSelectable&&!estopped;   // core::canChangeMatchInfo()
+    mtRender();
 
     $id('autoCard').classList.toggle('dim',selectedMode!=='auto');
     $id('mcModes').classList.toggle('locked',!modeSelectable);
@@ -1514,6 +1562,8 @@
   }
 
   function sendMatchCommand(cmd){
+    /* Leaving a match field by clicking Init posts it first; INIT waits for that answer. */
+    if(cmd==='init'&&mtPending) return mtPending.then(function(){return sendMatchCommand(cmd);});
     var autoLen=Math.round(Math.max(0,parseFloat($id('autoPeriod').value)||0)); // firmware tam sayı
     var url='/robotControl?cmd='+cmd+'&autoLen='+autoLen;
     var ac=new AbortController();
@@ -1591,6 +1641,94 @@
       fetchState();
     });
   });
+  /* ---- Match info: POST /match while disabled, GET when the 'S' counter "msq" changes.
+     After a robot reboot (msq 0) the page sends the values it last saw again, only to the
+     robot it saw them on (same SSID). They are kept only while the page is open. ---- */
+  var MT_KEYS=['station','type','match','replay','event','gd'];
+  var MT_MAX={station:6,type:3,match:65535,replay:255};
+  var mtSeq=-1,mtLast=null,mtKeep=null,mtKeepSsid='',mtGen=0,mtFlight=0,mtPending=null,mtIdle=false,mtRetryAt=0;
+  function mtEl(k){return $id('mt-'+k);}
+  function mtBytes(t){return new TextEncoder().encode(t).length;}
+  function mtEmpty(v){return !v||MT_KEYS.every(function(k){return !v[k]||v[k]==='0';});}
+  /* force: also the field being edited (after a refused change) */
+  function mtFill(j,force){
+    mtSeq=j.seq;mtLast=j;
+    if(j.seq>0){mtKeep={};mtKeepSsid=infoSsid;mtRetryAt=0;MT_KEYS.forEach(function(k){mtKeep[k]=String(j[k]);});}
+    MT_KEYS.forEach(function(k){var el=mtEl(k);if(force||document.activeElement!==el) el.value=String(j[k]);});
+    var st=+mtEl('station').value,w=document.querySelector('.w-match');
+    w.classList.toggle('mt-red',st>=1&&st<=3);w.classList.toggle('mt-blue',st>=4);
+  }
+  /* Only the newest request may fill the fields: an older GET must not undo a POST. */
+  function mtRequest(opts){
+    var ac=new AbortController(),tid=setTimeout(function(){ac.abort();},3000),gen=++mtGen;
+    opts.signal=ac.signal;mtFlight++;
+    return fetch('/match',opts).then(function(r){
+      if(!r.ok) return r.text().then(function(t){throw new Error(r.status+' '+t);});
+      return r.json();
+    }).then(function(j){if(gen===mtGen) mtFill(j);return j;}).finally(function(){clearTimeout(tid);mtFlight--;mtRender();});
+  }
+  function mtFetch(){
+    if(mtFlight) return;
+    mtRequest({}).catch(function(){});
+  }
+  function mtPost(v,msg,restore){
+    var body=MT_KEYS.map(function(k){return k+'='+encodeURIComponent(v[k]);}).join('&');
+    var p=mtRequest({method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body}).then(function(){
+      evlog('info',msg);
+      if(restore) $id('mtNote').textContent='Robot yeniden başladı: son maç bilgisi yeniden gönderildi.';
+    }).catch(function(err){
+      evlog('warn','Maç bilgisi değişmedi: '+err.message);
+      if(restore) mtRetryAt=Date.now()+3000;
+      else mtUndo();
+    }).then(function(){if(mtPending===p) mtPending=null;});
+    mtPending=p;
+  }
+  /* back to what the robot holds; the next 'S' frame refetches it */
+  function mtUndo(){if(mtLast) mtFill(mtLast,true);mtSeq=-1;}
+  function mtRender(){
+    MT_KEYS.forEach(function(k){mtEl(k).disabled=!mtIdle;});
+    var note=$id('mtNote');
+    if(!mtIdle) note.textContent='Maç bilgisi yalnız robot dururken (Init öncesi) değişir.';
+    else if(!/yeniden|bayt/.test(note.textContent)) note.textContent='Robot dururken değiştirilebilir.';
+    if(mtIdle&&!mtFlight&&mtSeq===0&&!mtEmpty(mtKeep)&&mtKeepSsid&&Date.now()>=mtRetryAt){
+      mtRetryAt=Infinity;   // once per reboot; a failure schedules a retry
+      /* A page that moved to another robot's WiFi must not hand it these values. */
+      fetch('/info').then(function(r){if(!r.ok)throw 0;return r.json();}).then(function(d){
+        if(d.ssid===mtKeepSsid) mtPost(mtKeep,'Maç bilgisi robota yeniden gönderildi',true);
+        else mtKeep=null;
+      }).catch(function(){mtRetryAt=Date.now()+3000;});
+    }
+  }
+  /* maxlength counts characters; the robot counts UTF-8 bytes (ç, ş, ğ take two). */
+  ['event','gd'].forEach(function(k){
+    var el=mtEl(k);el.dkPrev='';
+    el.addEventListener('focus',function(){el.dkPrev=el.value;});
+    el.addEventListener('input',function(){
+      if(mtBytes(el.value)<=64){el.dkPrev=el.value;return;}
+      var at=el.selectionStart-(el.value.length-el.dkPrev.length);
+      el.value=el.dkPrev;el.setSelectionRange(at,at);
+      $id('mtNote').textContent='Metin en çok 64 bayt olabilir (ç, ş, ğ, ı, ö, ü ikişer bayt).';
+    });
+  });
+  MT_KEYS.forEach(function(k){
+    mtEl(k).addEventListener('change',function(){
+      var v={},bad='';
+      MT_KEYS.forEach(function(q){
+        var el=mtEl(q),t=el.value.trim();
+        if(q in MT_MAX){
+          if(el.validity&&el.validity.badInput) t='x';
+          if(t==='') t='0';
+          if(!/^[0-9]+$/.test(t)||+t>MT_MAX[q]) bad=bad||(q==='match'?'Maç no 0-65535 olmalı':'Tekrar no 0-255 olmalı');
+          t=String(+t);
+        }else if(mtBytes(t)>64) bad=bad||'Metin en çok 64 bayt olabilir';
+        v[q]=t;
+      });
+      if(bad){evlog('warn','Maç bilgisi değişmedi: '+bad);mtUndo();return;}
+      $id('mtNote').textContent='Robot dururken değiştirilebilir.';
+      mtPost(v,'Maç bilgisi: '+mtEl('station').selectedOptions[0].textContent+
+                (v.gd?' · oyun verisi '+v.gd:''));
+    });
+  });
   function sendSimpleCmd(cmd){
     var ac=new AbortController();
     var tid=setTimeout(function(){ac.abort();},3000);
@@ -1632,13 +1770,13 @@
   $id('estopButton').addEventListener('click',function(){doEstop();});
   /* FRC DS geleneği: Space = acil durdurma — HER ZAMAN. Sayı kutusunda
      boşluğun anlamı yok; açılır listede ve metin kutusunda yalnız robot
-     STOPPED iken bastırılır (yazmak için), aksi halde yine e-stop.
+     STOPPED ya da TRANSITION iken (devre dışı) bastırılır (yazmak için), aksi halde yine e-stop.
      e.code eski tarayıcıda yoksa keyCode'a düşülür. */
   addEventListener('keydown',function(e){
     var isSpace=(e.code==='Space')||(!e.code&&(e.keyCode===32||e.key===' '));
     if(!isSpace) return;
     var t=document.activeElement;
-    if(t&&(t.tagName==='SELECT'||t.tagName==='TEXTAREA')&&currentPhase===0) return;
+    if(t&&(t.tagName==='SELECT'||t.tagName==='TEXTAREA'||(t.tagName==='INPUT'&&t.type==='text'))&&(currentPhase===0||currentPhase===5)) return;
     e.preventDefault(); if(t&&t.blur)t.blur(); doEstop();
   });
   $id('rebootButton').addEventListener('click',function(){
@@ -1953,12 +2091,14 @@
   }
 
   /* ---- /info (SSID, kanal, çip bilgileri) ---- */
+  var infoSsid='';
   function fetchInfo(){
     fetch('/info').then(function(r){
       if(!r.ok) return;
       return r.json();
     }).then(function(data){
       if(!data) return;
+      infoSsid=data.ssid||'';
       $id('dbgSsid').textContent=data.ssid||'--';
       $id('dbgCh').textContent=data.ch?(data.ch+(data.chSource?' ('+data.chSource+')':'')):'--';
       $id('sigCh').textContent=data.ch||'--';
@@ -2359,7 +2499,7 @@
      Field2d, Mechanism2d; WPILib 2027 layouts)
      or an order (PIDController).
      Text editors are textareas: they take Space only while the robot is
-     STOPPED; in any other phase Space is still the e-stop key.
+     disabled (STOPPED or TRANSITION); in any other phase Space is still the e-stop key.
      ========================================================================= */
   var dkTimer=0,dkDirty=false,dkClosed=dkMap(),dkLastQ=0,dkMax=1024; /* dkMax: robot's 'dashMax' */
   function dkNop(){}
@@ -2572,7 +2712,7 @@
       o.v=v;o.s=r.appendChild(dkEl('span','dk-s'));o.row=r;
       if(!o.rw) return;
       /* "x, y, derece" per pose, poses separated by ';'. Empty clears the object. A textarea, so
-         Space types only while the robot is stopped (the global e-stop key rule). */
+         Space types only while the robot is disabled (the global e-stop key rule). */
       o.ed=v.appendChild(dkEl('textarea','dk-ed'));o.ed.rows=1;
       o.ed.setAttribute('aria-label',o.name+' konumu: x, y metre, açı derece; pozlar ; ile ayrılır');
       o.ed.onkeydown=function(e){if(e.key==='Enter'){e.preventDefault();o.ed.blur();}};

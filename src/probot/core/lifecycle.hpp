@@ -112,6 +112,13 @@ namespace probot::core {
   inline bool canAcceptModeChange(robot::Phase phase, robot::Status status) {
     return canSelectMode(phase) && status == robot::Status::STOP;
   }
+  // Match information (alliance station, game data) changes only while
+  // disabled with nothing pending: STOPPED, or TRANSITION between
+  // autonomous and TeleOp (which lasts until the next INIT), never during
+  // an INIT or RUN phase.
+  inline bool canChangeMatchInfo(robot::Phase phase, robot::Status status, bool estopped) {
+    return !estopped && canAcceptModeChange(phase, status);
+  }
   // INIT has the same precondition as a mode change: idle and nothing pending.
   inline bool canAcceptInit(robot::Phase phase, robot::Status status) {
     return canAcceptModeChange(phase, status);

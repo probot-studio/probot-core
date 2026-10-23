@@ -54,6 +54,14 @@ Rules that generated code MUST follow:
   path: `probot::files::share("sd", "/sd/logs");`. Sharing a name again
   replaces it; `probot::files::unshare(name)` removes it. Before unmounting,
   unshare and wait until `probot::files::busy()` is false.
+- Alliance station and game data come from the Driver Station ("Maç
+  Bilgisi" card, changed only while the robot is disabled, possibly
+  between autonomous and TeleOp, never during an INIT or RUN phase):
+  `probot::ds::allianceStation()` (`AllianceStation::Unknown`, `Red1`..`Blue3`),
+  `char gd[65]; probot::ds::gameData(gd, sizeof gd);`, and
+  `probot::ds::matchInfo()` for event name, match type and numbers. Read
+  them in init or when `probot::ds::matchInfoSeq()` changes; handle
+  `Unknown` and empty game data.
 - Extra .cpp files include `<probot/api.hpp>` (config-free), never
   `<probot.h>`, which belongs to the sketch only.
 - To stop the running OpMode from code (for example on a fatal error),

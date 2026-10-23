@@ -8,6 +8,7 @@
 #include <Preferences.h>
 #include <errno.h>
 #include <DNSServer.h>
+#include <probot/robot/match_info.hpp>
 #include <probot/robot/state.hpp>
 #include <probot/core/lifecycle.hpp>
 #include <probot/io/battery.hpp>
@@ -227,7 +228,7 @@ namespace probot::driverstation::esp32 {
       cfg.server_port    = 80;
       cfg.ctrl_port      = 32768;
       cfg.stack_size     = 8192;
-      cfg.max_uri_handlers = 24;
+      cfg.max_uri_handlers = 28;   // 24 routes with the captive portal and /ws
       cfg.lru_purge_enable = true;
       // Keep all networking on core 0 with the WiFi stack; core 1 stays
       // exclusively for user teleop/autonomous loops.
@@ -266,6 +267,8 @@ namespace probot::driverstation::esp32 {
       registerUri("/health",           HTTP_GET,  handleHealth);
       registerUri("/info",             HTTP_GET,  handleInfo);
       registerUri("/opmodes",          HTTP_GET,  handleOpModes);
+      registerUri("/match",            HTTP_GET,  handleMatchGet);
+      registerUri("/match",            HTTP_POST, handleMatchSet);
       registerUri("/files",            HTTP_GET,  handleFiles);
       registerUri("/files/get",        HTTP_GET,  handleFileGet);
 
@@ -455,7 +458,7 @@ namespace probot::driverstation::esp32 {
         "{\"status\":%u,\"phase\":%u,\"selectedMode\":\"%s\",\"autoPeriodSeconds\":%d,"
         "\"autoRemainingMs\":%u,\"batt\":%u.%u,\"rssi\":%d,\"up\":%lu,\"heap\":%lu,\"dm\":%s,"
         "\"estop\":%s,\"joyAgeMs\":%ld,\"sta\":%ld,\"disc\":%u,\"dashMax\":%lu,"
-        "\"opMode\":\"%llu\",\"omv\":%lu,\"util\":%s,\"loopMs\":%lu,\"overruns\":%lu}",
+        "\"opMode\":\"%llu\",\"omv\":%lu,\"util\":%s,\"loopMs\":%lu,\"overruns\":%lu,\"msq\":%lu}",
         static_cast<unsigned>(s.status),
         static_cast<unsigned>(s.phase),
         opModeName(s.selectedMode),
@@ -475,7 +478,8 @@ namespace probot::driverstation::esp32 {
         (unsigned long)robot::opModes().version(),
         ds::utilityAvailable() ? "true" : "false",
         (unsigned long)probot::loopPeriodMs(),
-        (unsigned long)probot::loopOverruns());
+        (unsigned long)probot::loopOverruns(),
+        (unsigned long)robot::matchStore().seq());
       if (n < 0) return 0;
       return ((size_t)n >= out_size) ? out_size - 1 : (size_t)n;
     }
@@ -988,7 +992,7 @@ namespace probot::driverstation::esp32 {
       char buf[256];
       snprintf(buf, sizeof(buf),
                "{\"status\":%u,\"phase\":%u,\"selectedMode\":\"%s\",\"autoPeriodSeconds\":%d,\"autoRemainingMs\":%u,\"batt\":%u.%u,\"estop\":%s,"
-               "\"opMode\":\"%llu\",\"omv\":%lu,\"util\":%s}",
+               "\"opMode\":\"%llu\",\"omv\":%lu,\"util\":%s,\"msq\":%lu}",
                static_cast<unsigned>(s.status),
                static_cast<unsigned>(s.phase),
                opModeName(s.selectedMode),
@@ -998,7 +1002,8 @@ namespace probot::driverstation::esp32 {
                __atomic_load_n(&probot::robot::g_estop_latched, __ATOMIC_SEQ_CST) ? "true" : "false",
                (unsigned long long)s.opModeId,
                (unsigned long)robot::opModes().version(),
-               ds::utilityAvailable() ? "true" : "false");
+               ds::utilityAvailable() ? "true" : "false",
+               (unsigned long)robot::matchStore().seq());
 
       httpd_resp_set_type(req, "application/json");
       httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
@@ -1026,6 +1031,66 @@ namespace probot::driverstation::esp32 {
         off += n;
       }
       return httpd_resp_send_chunk(req, nullptr, 0);
+    }
+
+    static esp_err_t sendMatchInfo(httpd_req_t* req) {
+      uint32_t seq = 0;
+      robot::MatchInfo info = robot::matchStore().read(&seq);
+      char buf[robot::kMatchInfoJsonMax + 1];
+      size_t n = robot::matchInfoJson(info, seq, buf, sizeof buf);
+      httpd_resp_set_type(req, "application/json");
+      return httpd_resp_send(req, buf, (ssize_t)n);
+    }
+
+    // Match information (robot::MatchInfo) as JSON; the page refetches when
+    // the "msq" counter of the 'S' frame changes.
+    static esp_err_t handleMatchGet(httpd_req_t* req) {
+      auto* ds = self(req);
+      if (!ds->enforceOwner(req)) return ESP_OK;
+      return sendMatchInfo(req);
+    }
+
+    // Form body (see robot::applyMatchForm), accepted only while
+    // core::canChangeMatchInfo(). Replies with the stored information.
+    // Check and store cannot be split by an INIT: httpd runs every handler,
+    // /robotControl included, on its one task.
+    static esp_err_t handleMatchSet(httpd_req_t* req) {
+      auto* ds = self(req);
+      if (!ds->enforceOwner(req)) return ESP_OK;
+
+      // Every field at its longest, each text byte percent-encoded.
+      char body[96 + 2 * 3 * robot::MatchInfo::kMaxText];
+      int total = (int)req->content_len;
+      if (total < 0 || total > (int)sizeof(body) - 1) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad body size");
+        return ESP_OK;
+      }
+      int got = 0;
+      while (got < total) {
+        int r = httpd_req_recv(req, body + got, total - got);
+        if (r <= 0) {
+          httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Body recv failed");
+          return ESP_OK;
+        }
+        got += r;
+      }
+      body[got] = '\0';
+
+      auto s = ds->_rs.read();
+      if (!core::canChangeMatchInfo(s.phase, s.status,
+                                    __atomic_load_n(&probot::robot::g_estop_latched, __ATOMIC_SEQ_CST) != 0)) {
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_send(req, "[PB-E409] STOP before changing match info - docs/hatalar#pb-e409",
+                        HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+      }
+      robot::MatchInfo info = robot::matchStore().read();
+      if (const char* err = robot::applyMatchForm(body, info)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, err);
+        return ESP_OK;
+      }
+      robot::matchStore().set(info);
+      return sendMatchInfo(req);
     }
 
     static esp_err_t handleFiles(httpd_req_t* req) {
