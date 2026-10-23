@@ -946,6 +946,14 @@ namespace probot::dashboard {
     return Stats{ st.topics, st.lim.maxTopics, st.bytesUsed, st.lim.poolBytes, st.dropped };
   }
 
+  // The limits in effect (PROBOT_DASH_* after clamping); all zero before
+  // runtime_setup() configures the store.
+  inline Limits limits() {
+    const auto& st = detail::g_store;
+    core::MuxGuard g(st.mux);
+    return st.lim;
+  }
+
   namespace detail {
 
     inline bool persistUsed() {

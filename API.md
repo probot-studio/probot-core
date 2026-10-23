@@ -358,6 +358,7 @@ bir tur sonrakilerin planlı başlangıcını kaydırmaz.
 | `probot::setLoopPeriodMs(ms)` | Periyodu 1-1000 ms yapar, bir sonraki turdan geçerli; `0` `USER_LOOP_PERIOD_MS`'e döner. Aralık dışında `false` |
 | `probot::loopPeriodMs()` | Geçerli periyot (ms) |
 | `probot::loopOverruns()` | Açılıştan beri periyodunu aşan tur sayısı. `init`/`start`/`stop` çalıştıran turlar sayılmaz (onların süresi `PROBOT_HOOK_DEADLINE_MS`) |
+| `probot::loopGridRestarts()` | Açılıştan beri takvimin yeniden başlama sayısı: geç biten her tur, `init`/`start`/`stop` turları dahil. Değişirse sonraki turlar yeni bir zaman ızgarasında başlar |
 
 Periyodunu aşan bir turdan sonra kaçırılan turlar art arda çalıştırılmaz;
 takvim kısa bir beklemeden sonra yeniden başlar. Uyku süresi
@@ -530,6 +531,7 @@ drainWrites([](const Write& w, void*) {
 | `rejectWrite(id, reason)` | DS'e `'K'` reddi gönderir; topic'e başka yazma verilmeden önce çağırın. `fn` içinde ya da ~2 saniye içinde reddedilen DS yazması kaydedilmez. Geri yüklenen `PERSISTENT` değerde çerçeve gitmez, kayıt silinir |
 | `clearPersisted()` | Kayıtlı bütün `PERSISTENT` değerleri, henüz alınmamış geri yüklemeleri ve henüz kaydedilmemiş DS değerlerini siler; topic'ler değerini korur, sonraki DS yazması yeniden kaydedilir. Flash'a yazar: robot dururken ya da bir Init hook'unda çağırın (çıkışlar o sırada nötrdür) |
 | `stats()` | topic sayısı, bayt kullanımı, düşürülenler |
+| `limits()` | Geçerli sınırlar (`Limits`: `PROBOT_DASH_*` değerleri, üst sınırlara kırpılmış); `runtime_setup()` öncesinde hepsi 0 |
 
 Değer tipleri (`ValueType`, little-endian): 1 boolean (u8), 2 int (i64),
 3 float (f32), 4 double (f64), 5 string (UTF-8), 6 raw / `struct:X`,
