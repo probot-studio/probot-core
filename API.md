@@ -524,7 +524,7 @@ drainWrites([](const Write& w, void*) {
 |---|---|
 | `publish(path, vt, typeString, propsJson, flags)` | Topic açar; aynı yol + tip için aynı id. Tip çakışması, dolu tablo ya da havuz aşımında `kInvalid`. Runtime başlamadan önce de `kInvalid` |
 | `unpublish(id)` | Topic'i kaldırır (DS'e `'R'`) |
-| `set(id, data, len)` | Değeri kopyalar; aynıysa düşer (`KEEP_DUPLICATES` hariç) |
+| `set(id, data, len)` | Değeri kopyalar; aynıysa düşer (`KEEP_DUPLICATES` hariç). Değer, boyu 2'nin kuvvetine yuvarlanmış bir tamponda havuzdan yer alarak tutulur. `PROBOT_DASH_MAX_VALUE`'dan uzunsa ya da havuza sığmazsa `false` döner; DS eski değeri "Güncel değil" diye işaretler (kendi satırı olmayan widget topic'leri widget'ın altında listelenir), kaydedilen sonraki `set()` işareti kaldırır. Bilinmeyen id ya da `len > 0` iken `data == nullptr` da `false` döner (işaretsiz) |
 | `setProperties(id, json)` / `setFlags(id, flags)` | Yeniden duyurur |
 | `addSchema(name, type, data, len)` / `hasSchema(name)` | `struct:X` ve `proto:X` şemaları; en çok `PROBOT_DASH_MAX_SCHEMA_BYTES`, havuzdan (`PROBOT_DASH_POOL_BYTES`) yer alır. Sığmazsa `false` |
 | `drainWrites(fn, ctx)` | DS yazmalarını sırayla `fn`'e verir; `data` yalnız `fn` içinde geçerli. Tek bir task'tan çağırın |
@@ -619,8 +619,8 @@ Yaşam döngüsü / güvenlik makroları:
 | `PROBOT_FRAMEWORK` | tanımsız | Tanımlıysa OpMode hook'larının hepsi isteğe bağlı (framework katmanı için) |
 | `PROBOT_DASH_MAX_TOPICS` | 128 | Dashboard topic sayısı (1-255, PB-E108) |
 | `PROBOT_DASH_MAX_SCHEMAS` | 32 | Şema sayısı (0-255) |
-| `PROBOT_DASH_MAX_VALUE` | 1024 | Değer / özellik başına bayt (16-16384, PB-E108) |
-| `PROBOT_DASH_MAX_SCHEMA_BYTES` | 4096 | Şema başına bayt (16-32768, PB-E108); protobuf tanımları bir değerden büyük olabilir |
+| `PROBOT_DASH_MAX_VALUE` | 1024 | Değer / özellik başına bayt (16-16384, PB-E108). Havuzun dışında WebSocket alma tamponu (değer + 4 bayt) ve DS çerçeve tamponu (değer + ~520 bayt ile şema sınırı + ~515 bayttan büyüğü) ayrılır: varsayılanlarla ~5,6 KB, 16384'te ~33 KB heap |
+| `PROBOT_DASH_MAX_SCHEMA_BYTES` | 4096 | Şema başına bayt (16-32768, PB-E108); protobuf tanımları bir değerden büyük olabilir. DS çerçeve tamponu en az bu kadar olur (32768'de ~33 KB heap) |
 | `PROBOT_DASH_POOL_BYTES` | 32768 | Ad, tip, özellik, değer ve şemalar için toplam bayt |
 | `PROBOT_DASH_WRITE_QUEUE` | 2048 | Bekleyen DS yazmaları için bayt |
 | `PROBOT_DASH_PERIOD_MS` | 50 | Dashboard gönderim periyodu (10-250) |
@@ -799,6 +799,14 @@ Robot → istemci (push):
 'K' 0x4B  yazma reddi, tekrarlı: u16 id, u8 durum (1 bilinmeyen id,
           2 değiştirilemez, 3 tip uyuşmazlığı, 4 çözümlenemedi,
           5 kuyruk dolu)
+'E' 0x45  robotun son set()'i reddedildi, tekrarlı: u16 id, u8 sebep
+          (1 değer PROBOT_DASH_MAX_VALUE'dan uzun, 2 havuzda ya da
+          heap'te yer yok), u32 reddedilen son değerin uzunluğu. Sebep
+          değişince hemen, sonra yalnız topic'in DS'te kalan değeri her
+          yeniden gönderildiğinde (yeniden eşitleme, yazma yankısı) o
+          değerden sonra gelir;
+          topic'in sonraki 'V' kaydı işareti kaldırır (robot sonraki
+          set()'i değer aynı olsa da gönderir)
 ```
 
 Dashboard çerçevelerinde tüm çok baytlı alanlar little-endian'dır.

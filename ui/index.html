@@ -574,9 +574,11 @@
     .dk-v{flex:2 1 200px;min-width:0;display:flex;align-items:center;gap:7px;
       font:600 0.8rem/1.45 var(--mono);color:var(--ink);white-space:pre-wrap;word-break:break-word;}
     .dk-u{font:700 0.7rem var(--mono);color:var(--muted);flex:none;}
-    .dk-s{flex:none;font:700 0.6rem/1 var(--mono);letter-spacing:0.05em;text-transform:uppercase;color:var(--muted);}
+    .dk-s{flex:0 1 auto;min-width:0;overflow-wrap:anywhere;font:700 0.6rem/1.3 var(--mono);letter-spacing:0.05em;text-transform:uppercase;color:var(--muted);}
     .dk-row.pend .dk-s{color:#8a5a00;}
     .dk-row.err .dk-s{color:var(--stop);}
+    .dk-ws{padding:6px 2px;font:700 0.6rem/1.3 var(--mono);letter-spacing:0.05em;text-transform:uppercase;color:var(--stop);overflow-wrap:anywhere;}
+    .dk-ws[hidden]{display:none;}
     .dk-ed{flex:1;min-width:0;max-width:320px;padding:6px 9px;border-radius:8px;border:1px solid var(--line);background:#fff;
       font:600 0.82rem var(--mono);color:var(--ink);resize:none;}
     .dk-ed:focus{outline:none;border-color:var(--amber);box-shadow:0 0 0 3px rgba(255,176,32,0.25);}
@@ -2118,13 +2120,14 @@
 
   /* =========================================================================
      DASHBOARD CODEC - 'C' schema, 'A' announce, 'V' values, 'R' remove,
-     'K' write refusal (robot -> page) and 'W' write values (page -> robot).
+     'K' write refusal, 'E' refused robot value (robot -> page) and 'W' write
+     values (page -> robot).
      All little-endian; layouts follow probot/dashboard/dashboard.hpp.
      ValueType: 1 bool u8, 2 int i64, 3 f32, 4 f64, 5 UTF-8, 6 raw/struct,
      7-10 bool/int/f32/f64 arrays, 11 string[] of {u16 len, bytes}.
      ========================================================================= */
   function dkMap(){return Object.create(null);}
-  var dkTopics=dkMap();   /* id -> {id,vt,flags,name,type,props,raw,val,pend,err,ui} */
+  var dkTopics=dkMap();   /* id -> {id,vt,flags,name,type,props,raw,val,pend,err,stale,staleWhy,ui} */
   var dkSchemas=dkMap();  /* "struct:X" -> structschema text */
   var dkLayouts=dkMap();  /* "X" -> parsed layout, cleared when a schema arrives */
   var DK_ES=[0,1,8,4,8];
@@ -2288,7 +2291,7 @@
   function dkReset(){dkTopics=dkMap();dkSchemas=dkMap();dkLayouts=dkMap();dkSched();}
   /* Robot -> page dashboard frame. A truncated record ends the frame. */
   function dkFrame(v){
-    var n=v.length,p=1,f=v[0],t,id,len,a,nm,ty,miss=false;
+    var n=v.length,p=1,f=v[0],t,id,len,a,nm,ty,miss=false,cleared=false;
     function u16(){var x=v[p]|(v[p+1]<<8);p+=2;return x;}
     function str(l){var s=textDecoder.decode(v.subarray(p,p+l));p+=l;return s;}
     if(f===0x43){        /* 'C': u8+name, u8+type, u16+bytes */
@@ -2315,8 +2318,11 @@
         t=dkTopics[id];a=new Uint8Array(v.subarray(p,p+len));p+=len;
         if(!t){miss=true;continue;}
         var old=t.val;t.raw=a;t.val=dkDec(t.vt,a);t.pend=false;
+        /* A value with no mark to clear: the topic recovered, so a later refusal is logged again. */
+        if(t.stale){t.stale='';cleared=true;}else t.staleLog='';
         if(/\/\.type$/.test(t.name)&&old!==t.val) dkSched(); else t.ui();
       }
+      if(cleared) dkStaleSync();
     }else if(f===0x52){  /* 'R' repeated: u16 id */
       while(p+2<=n) delete dkTopics[u16()];
       dkSched();
@@ -2328,6 +2334,19 @@
         t.pend=false;t.err=DK_REFUSE[a]||('Reddedildi (kod '+a+')');t.ui(true);
         evlog('warn','Veri yazması reddedildi: '+t.name+' ('+t.err+')');
       }
+    }else if(f===0x45){  /* 'E' repeated: u16 id, u8 reason, u32 length. The robot's last set() was
+                            refused; it follows the value it leaves here and the next 'V' clears it. */
+      while(p+7<=n){
+        id=u16();a=v[p++];len=(v[p]|(v[p+1]<<8)|(v[p+2]<<16))+v[p+3]*16777216;p+=4;
+        t=dkTopics[id];
+        if(!t){miss=true;continue;}
+        t.staleWhy=a===1?'değer çok büyük, sınır '+dkMax+' bayt':a===2?'robotta bellek yetmedi':'robot değeri gönderemedi';
+        t.stale='Güncel değil: '+t.staleWhy;
+        t.ui();
+        /* Re-sent after each resend of the old value: log a refusal once. */
+        if(t.staleLog!==t.stale){t.staleLog=t.stale;evlog('warn','Veri güncellenemedi: '+t.name+' ('+t.staleWhy+', '+len+' bayt)');}
+      }
+      dkStaleSync();
     }
     if(miss) dkAskResync(); /* an announce was lost: ask for everything again */
   }
@@ -2367,8 +2386,9 @@
     catch(e){t.err=typeof e==='string'?e:'Geçersiz değer';t.ui(true);}
   }
   function dkStat(row,s,t,idle){
-    row.classList.toggle('pend',!!t.pend);row.classList.toggle('err',!!t.err);
-    s.textContent=t.err||(t.pend?'Bekliyor':idle);
+    t.statShown=true;
+    row.classList.toggle('pend',!!t.pend);row.classList.toggle('err',!!(t.err||t.stale));
+    s.textContent=t.err||(t.pend?'Bekliyor':t.stale||idle);
   }
   function dkLeaf(t,label){
     var row=dkEl('div','dk-row'),k=dkEl('span','dk-k',label),v=dkEl('span','dk-v'),s=dkEl('span','dk-s');
@@ -2769,12 +2789,32 @@
       d.open=!dkClosed[p];
       d.addEventListener('toggle',function(){dkClosed[p]=!d.open;});
       d.appendChild(sm);d.appendChild(box);par.appendChild(d);
-      if(w) box.appendChild(w); else dkRender(box,c,p);
+      if(w){
+        box.appendChild(w);
+        dkWStale.push({el:box.appendChild(dkEl('div','dk-ws')),node:c});
+      }else dkRender(box,c,p);
       /* A tunable PID shows measurement and error live from its telemetry twin. */
       if(!w&&ty&&ty.val==='PIDController'&&p.indexOf('/Tunables/')===0){
         var tm=dkFind(p.replace('/Tunables/','/Telemetry/'));
         if(tm)['measurement','error'].forEach(function(x){var t=dkKid(tm,x);if(t)box.appendChild(dkLeaf(t,x));});
       }
+    });
+  }
+  /* Widgets draw some topics without a status row (lists, ligaments, chooser parts): their
+     refused-value marks are listed under the widget. */
+  var dkWStale=[];
+  function dkStaleSync(){
+    dkWStale.forEach(function(x){
+      var l=[];
+      (function walk(n,pre){
+        Object.keys(n.k).forEach(function(k){
+          var c=n.k[k];
+          if(c.t&&c.t.stale&&!c.t.statShown) l.push(pre+k+' ('+c.t.staleWhy+')');
+          walk(c,pre+k+'/');
+        });
+      })(x.node,'');
+      x.el.textContent=l.length?'Güncel değil: '+l.join(', '):'';
+      x.el.hidden=!l.length;
     });
   }
   function dkFind(path){
@@ -2787,16 +2827,17 @@
     dkTimer=0;
     var tree=$id('dkTree'),act=document.activeElement,root={k:dkMap()},ids=Object.keys(dkTopics);
     if(act&&act!==document.body&&tree.contains(act)&&act.tagName!=='BUTTON'&&act.type!=='checkbox'){dkDirty=true;return;}
-    dkDirty=false;dkRoot=root;
+    dkDirty=false;dkRoot=root;dkWStale=[];
     ids.forEach(function(id){
       var t=dkTopics[id],n=root;
-      t.ui=dkNop;
+      t.ui=dkNop;t.statShown=false;
       t.name.split('/').forEach(function(s){if(s)n=n.k[s]||(n.k[s]={k:dkMap()});});
       n.t=t;
     });
     tree.innerHTML='';
     dkRender(tree,root,'');
     ids.forEach(function(id){dkTopics[id].ui();});
+    dkStaleSync();
     $id('dkCount').textContent=ids.length+' topic';
     $id('dkEmpty').hidden=ids.length>0;
   }

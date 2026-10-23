@@ -44,6 +44,10 @@ namespace probot::dashboard {
     Ok = 0, UnknownId = 1, Immutable = 2, TypeMismatch = 3, DecodeError = 4, QueueFull = 5
   };
 
+  // Reason carried by an 'E' frame: the robot's last set() of a topic was
+  // refused, so the Driver Station still shows an older value.
+  enum class SetRefusal : uint8_t { None = 0, TooLarge = 1, NoMemory = 2 };
+
   struct Write { TopicId id; ValueType vt; uint16_t len; const uint8_t* data; };
 
   struct Stats { uint16_t topics, maxTopics; uint32_t bytesUsed, bytesMax, dropped; };
@@ -84,6 +88,12 @@ namespace probot::dashboard {
       // of kept.
       bool     restorePending, restoreDelivered, dsDelivered, eraseStored, restoreFailed, failReported;
       bool     oversize;
+      // The last set() was refused (SetRefusal) for a value of refusedLen
+      // bytes (the latest one); refusedSent once the 'E' frame went out
+      // after the value.
+      uint8_t  refused;
+      bool     refusedSent;
+      uint32_t refusedLen;
       bool     candFresh;                    // persistTick() has not seen cand yet
       uint8_t* cand;
       uint8_t* tuned;
@@ -191,7 +201,7 @@ namespace probot::dashboard {
     // Frame type bytes, robot to Driver Station and back.
     constexpr uint8_t FRAME_ANNOUNCE = 'A', FRAME_VALUES = 'V', FRAME_REMOVE = 'R',
                       FRAME_SCHEMA = 'C', FRAME_ACK = 'K', FRAME_WRITE = 'W',
-                      FRAME_RESYNC = 'Q';
+                      FRAME_RESYNC = 'Q', FRAME_REFUSED = 'E';
     // Batched frames stop growing past this many bytes (one record may exceed it).
     constexpr size_t kFrameTarget = 1400;
 
@@ -275,6 +285,23 @@ namespace probot::dashboard {
     // a restored value does not count. Caller holds the lock.
     inline uint32_t queuedBytes(const Slot& s) {
       return s.writePending && !s.restorePending ? s.writeLen : 0;
+    }
+
+    // Caller holds the lock. Only a new reason is sent at once: a value
+    // that keeps growing would otherwise send a frame every tick. The
+    // latest length goes out with the next resend.
+    inline void markRefused(Slot& s, SetRefusal why, size_t len) {
+      s.refusedLen = (uint32_t)len;
+      if (s.refused == (uint8_t)why) return;
+      s.refused = (uint8_t)why; s.refusedSent = false;
+    }
+
+    // Caller holds the lock. The value is sent even if it equals the old
+    // one, since the Driver Station clears the refusal on the next 'V'.
+    inline void clearRefused(Slot& s) {
+      if (!s.refused) return;
+      s.refused = 0;
+      s.dirty = true;
     }
 
     // Caller holds the lock.
@@ -514,6 +541,7 @@ namespace probot::dashboard {
         memcpy(buf + w, s.props, pl); w += pl;
         s.announced = true;
         if (s.hasValue) s.dirty = true;
+        s.refusedSent = false;
       }
       if (w > 1) return w;
 
@@ -527,6 +555,20 @@ namespace probot::dashboard {
         }
         return w;
       }
+
+      // Refusals, each after the value it leaves on the Driver Station.
+      w = 1;
+      buf[0] = FRAME_REFUSED;
+      for (uint16_t i = 0; i < n && w + 7 <= target; ++i) {
+        Slot& s = st.slots[i];
+        if (s.state != SLOT_LIVE || !s.announced || !s.refused || s.refusedSent || s.dirty) continue;
+        TopicId id = makeId(i, s.gen);
+        buf[w++] = (uint8_t)id; buf[w++] = (uint8_t)(id >> 8);
+        buf[w++] = s.refused;
+        for (int b = 0; b < 4; ++b) buf[w++] = (uint8_t)(s.refusedLen >> (8 * b));
+        s.refusedSent = true;
+      }
+      if (w > 1) return w;
 
       w = 0;
       buf[w++] = FRAME_VALUES;
@@ -548,6 +590,7 @@ namespace probot::dashboard {
         if (s.len) memcpy(buf + w, s.value, s.len);
         w += s.len;
         s.dirty = false;
+        s.refusedSent = false;             // the refusal follows this value again
         st.valueCursor = (uint16_t)((i + 1) % n);
       }
       return w > head ? w : 0;
@@ -716,6 +759,9 @@ namespace probot::dashboard {
 
   // Copies a new value. An identical value is dropped unless the topic has
   // KEEP_DUPLICATES. Buffers only grow, so steady-state sets do not allocate.
+  // False when the value is longer than Limits::maxValue or does not fit in
+  // the pool; the Driver Station then marks the topic's older value as not
+  // current ('E' frame) until a later set() is stored.
   inline bool set(TopicId id, const void* data, size_t len) {
     using namespace detail;
     Store& st = g_store;
@@ -724,9 +770,11 @@ namespace probot::dashboard {
     {
       core::MuxGuard g(st.mux);
       Slot* s = liveSlot(st, id);
-      if (!s || len > st.lim.maxValue) return false;
+      if (!s) return false;
+      if (len > st.lim.maxValue) { markRefused(*s, SetRefusal::TooLarge, len); return false; }
       if (len <= s->cap) {
         bool same = s->hasValue && s->len == len && (len == 0 || memcmp(s->value, data, len) == 0);
+        clearRefused(*s);
         if (same && !(s->flags & KEEP_DUPLICATES)) return true;
         if (len) memcpy(s->value, data, len);
         s->len = (uint32_t)len; s->hasValue = true; s->dirty = true;
@@ -736,7 +784,7 @@ namespace probot::dashboard {
       while (grow < len) grow <<= 1;
       if (grow > st.lim.maxValue) grow = st.lim.maxValue;
       reserved = grow - s->cap;
-      if (!reserve(st, reserved)) { ++st.dropped; return false; }
+      if (!reserve(st, reserved)) { ++st.dropped; markRefused(*s, SetRefusal::NoMemory, len); return false; }
     }
     uint8_t* buf = (uint8_t*)malloc(grow);
     uint8_t* old = buf;
@@ -753,7 +801,11 @@ namespace probot::dashboard {
         }                              // else grown concurrently: drop ours
         memcpy(s->value, data, len);
         s->len = (uint32_t)len; s->hasValue = true; s->dirty = true;
+        s->refused = 0;
         ok = true;
+      } else if (s) {
+        ++st.dropped;
+        markRefused(*s, SetRefusal::NoMemory, len);
       }
     }
     free(old);
