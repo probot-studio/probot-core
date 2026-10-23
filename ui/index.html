@@ -135,9 +135,9 @@
     .dash{
       display:grid;gap:11px;
       grid-template-columns:repeat(12,minmax(0,1fr));
-      /* Telemetry spans rows 2-3: its extra height goes to row 3, not between
-         Match Control and Match Info. */
-      grid-template-rows:auto auto 1fr;
+      /* Telemetry spans rows 2-4: its extra height goes to row 4, not between
+         the cards on the left. */
+      grid-template-rows:auto auto auto 1fr;
       align-items:start;
     }
     .w-status,.w-battery,.w-signal{align-self:stretch;} /* row1 üçlüsü aynı boyda dursun */
@@ -285,6 +285,12 @@
     .mc-bottom{padding-top:10px;border-top:1px dashed rgba(217,48,37,0.35);}
     .estop-note{display:block;text-align:center;font-size:0.64rem;font-weight:700;color:var(--muted);letter-spacing:0.03em;margin-top:6px;}
 
+    /* --- ROBOT DISPLAY (DriverStationDisplay text: 48 rows x 160 columns, spaces kept) --- */
+    .dsd-pre{margin:0;padding:10px;min-height:60px;max-height:340px;overflow:auto;background:#14100c;color:#f4ece4;
+      border-radius:8px;font:500 0.74rem/1.35 var(--mono);white-space:pre;}
+    .dk-dsd{margin:6px 0;max-height:420px;}
+    .dsd-path{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:none;letter-spacing:0;font-family:var(--mono);}
+    .dsd-note{margin-top:6px;font-size:0.7rem;font-weight:700;color:var(--stop);}
     /* --- MATCH INFO (station, game data; editable only while STOPPED) --- */
     .mt-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;}
     .mt-f{display:flex;flex-direction:column;gap:4px;min-width:0;}
@@ -629,6 +635,7 @@
       .dash .widget{grid-column:1 / -1 !important;grid-row:auto !important;}
       /* dikeyde öncelik: faz + kontroller üstte, durum ortada, telemetri altta */
       .w-phase{order:1;} .w-control{order:2;} .w-status{order:3;}
+      .w-dsd{order:2;} /* after Match Control in the DOM */
       .w-battery{order:4;} .w-signal{order:5;} .w-tele{order:6;} .w-match{order:7;}
       .w-tele .console{flex:none;height:240px;min-height:0;}
       .jgrid{grid-template-columns:1fr;}
@@ -688,7 +695,10 @@
       .gauge,.gauge svg{width:84px;height:48px;}
       .gauge .read{font-size:0.95rem;}
       .dash .w-tele{order:0;grid-column:7 / span 6 !important;grid-row:3 !important;}
+      .dash .w-dsd{order:0;grid-column:1 / -1 !important;grid-row:4 !important;}
+      .dash .w-dsd .dsd-pre{max-height:max(120px, calc(100vh - 90px));} /* the whole card fits on screen */
       .dash .w-match{order:0;grid-column:1 / -1 !important;grid-row:4 !important;} /* set before driving: below everything */
+      .dash.dsd-on .w-match{grid-row:5 !important;}
       .console{height:120px;height:max(110px, calc(100vh - 336px));min-height:0;flex:none;}
       .mc-top{padding:8px 12px;}
       .phase-badge{font-size:1.2rem;}
@@ -837,6 +847,13 @@
               </button>
               <span class="estop-note">Tüm motorları anında keser · temizlemek için reboot · kısayol: <b>Space</b></span>
             </div>
+          </div>
+
+          <!-- ROBOT DISPLAY: shown while the robot publishes a DriverStationDisplay -->
+          <div class="widget w-dsd" data-w="dsDisplay" hidden>
+            <div class="w-head" id="dsdHead"><span>Robot Ekranı</span><span class="dsd-path" id="dsdPath"></span></div>
+            <pre class="dsd-pre" id="dsdPre" tabindex="0" role="region" aria-labelledby="dsdHead"></pre>
+            <div class="dsd-note" id="dsdNote" role="status" hidden></div>
           </div>
 
           <!-- TELEMETRY -->
@@ -1143,8 +1160,9 @@
     statusStrip : { col:7,  span:2, row:1 },
     battery     : { col:9,  span:2, row:1 },
     signal      : { col:11, span:2, row:1 },
-    telemetry   : { col:7,  span:6, row:2, rowSpan:2 },
-    matchInfo   : { col:1,  span:6, row:3 }
+    telemetry   : { col:7,  span:6, row:2, rowSpan:3 },
+    dsDisplay   : { col:1,  span:6, row:3 },
+    matchInfo   : { col:1,  span:6, row:3 }   // row 4 while the robot display is shown
   };
   function applyLayout(){
     Object.keys(LAYOUT).forEach(function(key){
@@ -2463,6 +2481,7 @@
         if(/\/\.type$/.test(t.name)&&old!==t.val) dkSched(); else t.ui();
       }
       if(cleared) dkStaleSync();
+      dsdSync();
     }else if(f===0x52){  /* 'R' repeated: u16 id */
       while(p+2<=n) delete dkTopics[u16()];
       dkSched();
@@ -2486,7 +2505,7 @@
         /* Re-sent after each resend of the old value: log a refusal once. */
         if(t.staleLog!==t.stale){t.staleLog=t.stale;evlog('warn','Veri güncellenemedi: '+t.name+' ('+t.staleWhy+', '+len+' bayt)');}
       }
-      dkStaleSync();
+      dkStaleSync();dsdSync();
     }
     if(miss) dkAskResync(); /* an announce was lost: ask for everything again */
   }
@@ -2496,7 +2515,7 @@
      with TUNABLE|MUTABLE flags get editors that send 'W' on commit
      (Enter/blur/change) and stay pending until the next 'V' or a 'K'.
      A sibling ".type" string picks a widget (Selectable, Command, Alerts, Scheduler,
-     Field2d, Mechanism2d; WPILib 2027 layouts)
+     Field2d, Mechanism2d; WPILib 2027 layouts; DriverStationDisplay)
      or an order (PIDController).
      Text editors are textareas: they take Space only while the robot is
      disabled (STOPPED or TRANSITION); in any other phase Space is still the e-stop key.
@@ -2903,6 +2922,15 @@
       };
       [cn,ci].concat(cc?[cc]:[]).forEach(function(x){x.ui=ui;});
       return box;
+    }else if(ty==='DriverStationDisplay'){
+      /* Monospace text screen: "text" holds up to 48 lines of up to 160 columns. */
+      w=dkKid(n,'text');
+      if(!w||w.vt!==5) return null;
+      var pre=dkEl('pre','dsd-pre dk-dsd'),last;
+      pre.tabIndex=0;pre.setAttribute('role','region');pre.setAttribute('aria-label','Robot ekranı');
+      /* Rewrite only on change, so a selection survives repeated values. */
+      w.ui=function(){if(w.val!==last){last=w.val;pre.textContent=dsdFormat(last);}};
+      return pre;
     }else if(ty==='Field2d') return dkField(n);
     else if(ty==='Mechanism2d') return dkMech(n);
     else return null;
@@ -2957,6 +2985,63 @@
       x.el.hidden=!l.length;
     });
   }
+  /* Robot display on the Dashboard: /Telemetry/DriverStationDisplay, else the first
+     DriverStationDisplay folder by path. Its text is clipped to 48 x 160. */
+  var dsdTopic=null,dsdShown=false,dsdLast,dsdGone=0,dsdTimer=0;
+  function dsdFormat(v){
+    /* Lines end in \n, \r\n or \r. Tabs expand to the next multiple of 8 columns, so a
+       column is one code point both when clipping and on screen. */
+    return String(v||'').split(/\r\n?|\n/).slice(0,48).map(function(l){
+      var out='',col=0;
+      Array.from(l).some(function(c){
+        if(c==='\t'){do{out+=' ';col++;}while(col%8&&col<160);}else{out+=c;col++;}
+        return col>=160;
+      });
+      return out;
+    }).join('\n');
+  }
+  function dsdFind(){
+    var best=null,path='';
+    (function walk(n,pre){
+      Object.keys(n.k).sort().forEach(function(k){
+        var c=n.k[k],ty=dkKid(c,'.type'),tx=dkKid(c,'text'),p=pre+'/'+k;
+        if(ty&&ty.val==='DriverStationDisplay'&&tx&&tx.vt===5&&(!best||p==='/Telemetry/DriverStationDisplay')){best=tx;path=p;}
+        walk(c,p);
+      });
+    })(dkRoot,'');
+    dsdTopic=best;
+    var pe=$id('dsdPath');
+    pe.textContent=best&&path!=='/Telemetry/DriverStationDisplay'?path:'';pe.title=pe.textContent;
+    dsdSync();
+  }
+  function dsdShow(on){
+    if(on===dsdShown) return;
+    dsdShown=on;
+    document.querySelector('.w-dsd').hidden=!on;
+    document.querySelector('.dash').classList.toggle('dsd-on',on);
+    LAYOUT.matchInfo.row=on?4:3;applyLayout();
+    if(!on){dsdLast=undefined;$id('dsdPre').textContent='';$id('dsdNote').hidden=true;}
+  }
+  function dsdSync(){
+    /* After a reconnect the topic is announced again as a new object: follow it by id and name. */
+    var t=dsdTopic&&dkTopics[dsdTopic.id],note=$id('dsdNote');
+    if(t&&t.name===dsdTopic.name) dsdTopic=t; else t=null;
+    if(!t){
+      /* Hide only when it stays gone: a reconnect clears every topic until the robot
+         announces them again, and the card should not blink meanwhile. */
+      if(dsdShown){
+        if(!dsdGone) dsdGone=Date.now();
+        if(Date.now()-dsdGone>=1500) dsdShow(false);
+        else if(!dsdTimer) dsdTimer=setTimeout(function(){dsdTimer=0;dsdSync();},1600);
+      }
+      return;
+    }
+    dsdGone=0;dsdShow(true);
+    /* A re-announced topic has no value until its first 'V': keep the old text. */
+    if(t.val!==undefined&&t.val!==dsdLast){dsdLast=t.val;$id('dsdPre').textContent=dsdFormat(dsdLast);}
+    if(note.textContent!==(t.stale||'')) note.textContent=t.stale||'';
+    note.hidden=!t.stale;
+  }
   function dkFind(path){
     var n=dkRoot;
     path.split('/').forEach(function(s){if(s&&n)n=n.k[s];});
@@ -2978,6 +3063,7 @@
     dkRender(tree,root,'');
     ids.forEach(function(id){dkTopics[id].ui();});
     dkStaleSync();
+    dsdFind();
     $id('dkCount').textContent=ids.length+' topic';
     $id('dkEmpty').hidden=ids.length>0;
   }

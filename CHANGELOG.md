@@ -168,6 +168,12 @@ Biçim [Keep a Changelog](https://keepachangelog.com/), sürümler
   last saw again after that robot (same SSID) reboots. New endpoint `/match`
   (GET, and POST with a form body); the `'S'` frame and `/getState` gain
   `msq`.
+- Driver Station text display: a dashboard folder whose `.type` is
+  `DriverStationDisplay` shows its `text` string (lines separated by
+  `\n`, up to 48 lines of 160 characters, spaces kept, no colors) in a
+  monospace panel on the "Veri" page. `/Telemetry/DriverStationDisplay`
+  (or else the first such folder) also gets a "Robot Ekranı" card on the
+  Dashboard, hidden while no such topic exists. No protocol change.
 
 ### Changed
 - Dashboard schemas have their own size limit, `PROBOT_DASH_MAX_SCHEMA_BYTES`

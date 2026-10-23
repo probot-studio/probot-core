@@ -524,7 +524,17 @@ değildir. Saha boyutu ve görseli yayımlanmaz: görünüm pozlara göre büyü
 `backgroundColor`, `.type` taşımayan ve `position` [x, y] taşıyan kökler,
 `.type` = `line` olan iç içe `angle`, `length`, `color`, `weight` kolları)
 çizilir. Beklenen alt topic'ler eksik ya da tipi yanlışsa klasör düz ağaç
-olarak gösterilir. Metin kutularına boşluk yalnız robot devre dışıyken
+olarak gösterilir. `.type` = `DriverStationDisplay` olan klasörün `text`
+(string) topic'i `\n` (ya da `\r\n`, `\r`) ile ayrılmış satırlardan oluşan
+düz metindir: eş aralıklı yazıyla, boşluklar korunarak gösterilir (ilk 48
+satır, satır başına 160 karakter; sekme 8'in katı olan sütuna açılır; renk
+yok). Boyu `PROBOT_DASH_MAX_VALUE` ile sınırlıdır: varsayılan 1024 bayt 48
+satırın her birine ~20 karakter demektir; dolu bir 48 x 160 ekran (~7,7 KB)
+için 8192 gerekir (heap maliyeti makro tablosunda).
+`/Telemetry/DriverStationDisplay` (yoksa böyle ilk klasör) Dashboard'da da
+"Robot Ekranı" kartında görünür; böyle bir topic yokken kart gizlidir.
+Robotun reddettiği bir değer (`set()` sınırı aştı) kartta not edilir.
+Metin kutularına boşluk yalnız robot devre dışıyken
 (STOPPED ya da TRANSITION) yazılır; diğer fazlarda Space yine acil
 durdurmadır. Protokol aşağıda ("WS çerçeveleri").
 
