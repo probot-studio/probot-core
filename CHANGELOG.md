@@ -71,6 +71,11 @@ Biçim [Keep a Changelog](https://keepachangelog.com/), sürümler
   poses, and up to 8 poses can be dragged) and `Mechanism2d` (roots with
   `position`, nested ligaments drawn on a canvas, described in its
   accessible label).
+- Dashboard: a refused `set()` (value longer than `PROBOT_DASH_MAX_VALUE`
+  or no room in the pool) is sent to the Driver Station in a new `'E'`
+  frame (topic id, reason, length), and the "Veri" page marks the older
+  value as not current until a later `set()` is stored. An older page
+  ignores the frame.
 - OpMode list: `probot::ds::setOpModeOptions()` publishes named options
   (id, mode, name, group, description) for the Driver Station, which shows
   a selector for the selected mode and sends `cmd=opmode&id=N`;

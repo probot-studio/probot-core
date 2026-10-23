@@ -365,3 +365,117 @@ TEST_CASE(dashboard_limits_report_the_configured_values_after_clamping){
   EXPECT_TRUE(l.maxTopics == 255 && l.maxSchemas == 4 && l.maxValue == 16384);
   EXPECT_TRUE(l.poolBytes == 32768 && l.writeQueueBytes == 2048 && l.maxSchemaBytes == 32768);
 }
+
+namespace {
+  // Records of an 'E' frame: {id, reason, refused length}.
+  struct Refusal { TopicId id; uint8_t reason; uint32_t len; };
+  std::vector<Refusal> refusals(const Frame& f){
+    std::vector<Refusal> out;
+    for (size_t p = 1; p + 7 <= f.b.size(); p += 7) {
+      uint32_t len = f.b[p + 3] | (f.b[p + 4] << 8) | (f.b[p + 5] << 16) | ((uint32_t)f.b[p + 6] << 24);
+      out.push_back(Refusal{ u16(f.b, p), f.b[p + 2], len });
+    }
+    return out;
+  }
+
+  std::vector<char> kindsUntilIdle(){
+    std::vector<char> kinds;
+    for (Frame f = next(); !f.b.empty(); f = next()) kinds.push_back((char)f.b[0]);
+    return kinds;
+  }
+}
+
+TEST_CASE(dashboard_refused_set_is_signalled_once_and_cleared_by_the_next_stored_value){
+  fresh();
+  TopicId path = dash::publish("/Telemetry/Field/Path", ValueType::Raw, "struct:Pose2d[]", nullptr, dash::TELEMETRY);
+  std::vector<uint8_t> small(24, 1), big(1100, 2);
+  EXPECT_TRUE(dash::set(path, small.data(), small.size()));
+  EXPECT_TRUE((kindsUntilIdle() == std::vector<char>{ 'A', 'V' }));
+
+  EXPECT_TRUE(!dash::set(path, big.data(), big.size()));
+  Frame f = next();
+  EXPECT_TRUE(!f.b.empty() && f.b[0] == 'E');
+  std::vector<Refusal> r = refusals(f);
+  EXPECT_TRUE(r.size() == 1 && r[0].id == path && r[0].reason == (uint8_t)dash::SetRefusal::TooLarge && r[0].len == 1100);
+  EXPECT_TRUE(next().b.empty());
+  // The same reason is not repeated, even for a value that keeps growing;
+  // the latest length goes out with the next resend.
+  EXPECT_TRUE(!dash::set(path, big.data(), big.size()));
+  EXPECT_TRUE(!dash::set(path, big.data(), 1030));
+  EXPECT_TRUE(next().b.empty());
+  dash::detail::requestResync();
+  EXPECT_TRUE(next().b[0] == 'A' && next().b[0] == 'V');
+  r = refusals(next());
+  EXPECT_TRUE(r.size() == 1 && r[0].len == 1030);
+  EXPECT_TRUE(next().b.empty());
+
+  // The next stored value clears it and is sent even when identical.
+  EXPECT_TRUE(dash::set(path, small.data(), small.size()));
+  f = next();
+  EXPECT_TRUE(!f.b.empty() && f.b[0] == 'V' && values(f).size() == 1 && values(f)[0].id == path);
+  EXPECT_TRUE(next().b.empty());
+  dash::detail::resetForTest();
+}
+
+TEST_CASE(dashboard_refused_set_follows_every_resend_of_the_old_value){
+  fresh();
+  TopicId pose = dash::publish("/Tunables/Field/Robot", ValueType::Raw, "struct:Pose2d[]", nullptr,
+                               dash::TUNABLE | dash::MUTABLE);
+  std::vector<uint8_t> small(24, 1), big(2048, 2);
+  dash::set(pose, small.data(), small.size());
+  kindsUntilIdle();
+  EXPECT_TRUE(!dash::set(pose, big.data(), big.size()));
+  EXPECT_TRUE((kindsUntilIdle() == std::vector<char>{ 'E' }));
+
+  // A reconnecting Driver Station gets the old value, then the refusal.
+  dash::detail::requestResync();
+  EXPECT_TRUE((kindsUntilIdle() == std::vector<char>{ 'A', 'V', 'E' }));
+
+  // So does the echo of a drained Driver Station write.
+  EXPECT_TRUE(dash::detail::pushWrite(pose, (uint8_t)ValueType::Raw, small.data(), small.size()) == dash::WriteStatus::Ok);
+  g_drained.clear();
+  EXPECT_TRUE(dash::drainWrites(collect, nullptr) == 1);
+  EXPECT_TRUE((kindsUntilIdle() == std::vector<char>{ 'V', 'E' }));
+  dash::detail::resetForTest();
+}
+
+TEST_CASE(dashboard_set_refused_by_the_pool_is_signalled_without_a_value){
+  fresh(limits(64, 2048, 1));               // one slot, so it is reused below
+  TopicId t = dash::publish("/T/v", ValueType::Raw, "raw", nullptr, dash::TELEMETRY);
+  std::vector<uint8_t> v(200, 3);
+  EXPECT_TRUE(!dash::set(t, v.data(), v.size()));
+  EXPECT_TRUE(dash::stats().dropped == 1);
+  Frame f = next();
+  EXPECT_TRUE(!f.b.empty() && f.b[0] == 'A');
+  std::vector<Refusal> r = refusals(next());
+  EXPECT_TRUE(r.size() == 1 && r[0].id == t && r[0].reason == (uint8_t)dash::SetRefusal::NoMemory && r[0].len == 200);
+  EXPECT_TRUE(next().b.empty());
+  // A refusal waiting to be sent is dropped with its topic, and the
+  // slot's next topic starts clean.
+  dash::detail::requestResync();
+  dash::unpublish(t);
+  EXPECT_TRUE((kindsUntilIdle() == std::vector<char>{ 'R' }));
+  TopicId u = dash::publish("/T/w", ValueType::Raw, "raw", nullptr, dash::TELEMETRY);
+  EXPECT_TRUE(u != dash::kInvalid && (u & 0xFF) == (t & 0xFF));
+  EXPECT_TRUE((kindsUntilIdle() == std::vector<char>{ 'A' }));
+  dash::detail::resetForTest();
+}
+
+TEST_CASE(dashboard_refusal_is_cleared_by_a_value_that_grows_the_buffer_and_follows_a_reannounce){
+  fresh();
+  TopicId alerts = dash::publish("/Telemetry/Alerts/errors", ValueType::StringArray, "string[]", nullptr, dash::TELEMETRY);
+  std::vector<uint8_t> small(10, 1), big(1500, 2), mid(600, 3);
+  dash::set(alerts, small.data(), small.size());
+  kindsUntilIdle();
+  EXPECT_TRUE(!dash::set(alerts, big.data(), big.size()));
+  EXPECT_TRUE((kindsUntilIdle() == std::vector<char>{ 'E' }));
+  // A changed flag re-announces the topic: its value, then the refusal.
+  EXPECT_TRUE(dash::setFlags(alerts, dash::TELEMETRY | dash::ROBUST));
+  EXPECT_TRUE((kindsUntilIdle() == std::vector<char>{ 'A', 'V', 'E' }));
+  // A value larger than the current buffer is stored (grow path) and clears it.
+  EXPECT_TRUE(dash::set(alerts, mid.data(), mid.size()));
+  EXPECT_TRUE((kindsUntilIdle() == std::vector<char>{ 'V' }));
+  dash::detail::requestResync();
+  EXPECT_TRUE((kindsUntilIdle() == std::vector<char>{ 'A', 'V' }));
+  dash::detail::resetForTest();
+}
