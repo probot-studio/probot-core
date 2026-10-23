@@ -91,7 +91,7 @@ Hepsi `#include <probot.h>` satırından **önce** tanımlanır:
 | `PROBOT_BATTERY_R_TOP_K` / `_R_BOT_K` | — | Bölücü dirençleri, kΩ (batarya tarafı / GND tarafı). 3S için öneri: 100k/22k → 12.6 V'ta 2.27 V |
 | `PROBOT_BATTERY_INA` | kapalı | Batarya ölçümü, yöntem 2: I2C sensör — `219` ya da `226`. ADC yöntemiyle birlikte kullanılamaz [PB-E105] |
 | `PROBOT_BATTERY_INA_ADDR` | `0x40` | INA I2C adresi |
-| `PROBOT_BATTERY_INA_SDA` / `_SCL` | kart default'u | INA için I2C pinleri |
+| `PROBOT_BATTERY_INA_SDA` / `_SCL` | `1` / `2` | INA için I2C pinleri (Pulse J3 soketi). İkisi birlikte verilir ya da hiçbiri [PB-E105] |
 | `PROBOT_BATTERY_TRIM` | `1.0f` | Multimetreyle ince ayar çarpanı (0.5-2.0) |
 | `USER_LOOP_PERIOD_MS` | `20` | InitLoop/loop sabit hızlı çağrı periyodu (~50 Hz), 1-1000; çalışırken `probot::setLoopPeriodMs()` |
 | `PROBOT_USER_STACK` | `8192` | User task stack'i, bayt (en az 4096) [PB-E107] |
@@ -214,11 +214,18 @@ Sensöre ulaşılamazsa çalışma zamanında [PB-E306] uyarısı düşer ve gö
 uyarısı için `probot::io::battery::setLowVoltage(volt)` eşiği verip
 `isLowVoltage()` okunur (varsayılan kapalı).
 
-> **INA'nın I2C bus'ını kullanıcı kodundan kullanmayın.** Kütüphane INA'yı
-> kendi görev döngüsünden okur; aynı `Wire` bus'ına robot kodunuzdan ikinci
-> bir cihaz (IMU, OLED...) bağlarsanız okumalar karışabilir. Kendi I2C
-> cihazınız varsa ya batarya için ADC yöntemini seçin ya da cihazınızı
-> `Wire1`'e (ayrı pinler) taşıyın.
+> **INA'nın I2C bus'ını paylaşmak:** kütüphane `Wire`'ı
+> `PROBOT_BATTERY_INA_SDA` / `_SCL` (varsayılan 1 / 2) pinlerinde 100 kHz ve
+> 20 ms işlem zaman aşımıyla başlatır, INA'yı kendi görevinden okur. Aynı
+> pinlerdeki başka bir cihaz (IMU, OLED...) robot kodundan `Wire`'ı
+> kullanabilir: bus aktarımları sıraya girer. Alınan baytlar girmez:
+> `Wire.read()` onları ortak bir tampondan okur, ikisi aynı anda okursa
+> nadiren iki cihazdan birinin okuması yanlış çıkar. Her okuması önemli
+> olan cihazı `Wire1`'e (başka pinler) koyun. `Wire`'ı aynı pinlerle
+> (`Wire.begin(1, 2)`) başlatın ya da hiç başlatmayın: ilk çalışan
+> `Wire.begin()` pinleri belirler, başka pinler INA'yı ulaşılamaz yapar
+> [PB-E306]. Robot kodundaki `Wire.setClock()` ve `Wire.setTimeOut()` INA'ya
+> da uygulanır.
 >
 > **Shunt notu:** akım hesabı `PROBOT_BATTERY_INA_SHUNT_MOHM` (default 100)
 > ile yapılır. INA226'nın ±81.92 mV shunt aralığı 100 mΩ ile ±0.82 A'da

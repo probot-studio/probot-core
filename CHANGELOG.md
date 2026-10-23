@@ -9,6 +9,16 @@ Biçim [Keep a Changelog](https://keepachangelog.com/), sürümler
 ## [Unreleased]
 
 ### Breaking
+- INA battery sensor: without `PROBOT_BATTERY_INA_SDA` / `_SCL` the
+  library now starts `Wire` on SDA 1 / SCL 2, the I2C header (J3) of the
+  recommended Boardoza Pulse board, instead of the core's generic
+  ESP32-S3 pins (SDA 8 / SCL 9), which are on no Pulse header. To keep an
+  INA on 8 / 9, define `PROBOT_BATTERY_INA_SDA 8` and
+  `PROBOT_BATTERY_INA_SCL 9`. The default pins now also go through the
+  PB-E105 conflict checks, so an INA sketch without its own pins that puts
+  `PROBOT_ESTOP_ENABLE_PIN` or `PROBOT_RSL_PIN` on GPIO 1 or 2 no longer
+  compiles. A new PB-E105 check rejects INA pins equal to `NEOPIXEL_PIN`
+  (default 3).
 - `initLoop`/`loop` run at a fixed rate: passes start on a fixed schedule
   one period apart, so the hook's own run time no longer stretches the
   period (it used to sleep a full period after the work). An overrun does
