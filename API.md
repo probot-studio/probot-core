@@ -400,6 +400,70 @@ static const bool kInstalled = probot::framework::install({
   Tanımlanan hook'lar framework turunun içinde çalışmaya devam eder. Bu
   modda yanlış yazılmış bir hook adı hata vermez, sadece çalışmaz.
 
+## Dosya paylaşımı (ileri seviye)
+
+Robot programının LittleFS'e ya da SD karta yazdığı dosyalar (örneğin
+`.wpilog` kayıtları) DS'in **Logs** sayfasındaki **Dosyalar** kartında
+listelenir ve indirilir:
+
+```cpp
+#include <LittleFS.h>
+
+// setup() kütüphanenindir: dosya sistemini sketch açılışta, framework
+// boot hook'unda bağlar (kullanıcı task'ında, ilk döngüden önce bir kez).
+static void shareLogs() {
+  if (LittleFS.begin(true)) probot::files::share("logs", LittleFS, "/logs");
+}
+static const bool kBoot = probot::framework::install({ &shareLogs, nullptr, nullptr, nullptr });
+```
+
+Böylece kart açılıştan hemen sonra, acil durdurmadan sonraki yeniden
+başlatmada da çalışır. `install()` yalnız bir kez kabul edilir: framework
+kuran bir SDK kullanıyorsanız paylaşımı onun açılış hook'unda kurun. Bu
+mümkün değilse paylaşımı ilk `autonomousInit()`/`teleopInit()`'te bir kez
+kurun; o zaman yeniden başlatmadan sonra dosyalar bir Init ve Stop'tan
+sonra görünür.
+
+`bool probot::files::share(ad, fs, klasor = "/")`:
+
+- `ad`: 1-15 karakter, `A-Z a-z 0-9 _ -`. En fazla 4 paylaşım.
+- `fs`: bağlanmış herhangi bir Arduino dosya sistemi (`LittleFS`, `SD`,
+  `SD_MMC`...). Paylaşım sürdükçe bağlı kalmalı.
+- `klasor`: `/` ile başlayan yol; `.` ve `..` içeremez. Yalnız doğrudan bu
+  klasördeki dosyalar sunulur, alt klasörler sunulmaz. Listede paylaşım
+  başına en fazla 256 dosya görünür (klasör sırasıyla ilk 512 girişe
+  bakılır; LittleFS ad sırası tutar, tarihli adlarda en yeni kayıtlar
+  listeye girmeyebilir: eski kayıtları silin). Adı 127 bayttan uzun ya da
+  kontrol karakteri içeren dosyalar listelenmez.
+- Geçersiz ad ya da klasörde ve 4 paylaşım doluyken yeni bir adda `false`
+  döner. Aynı adla yeniden çağırmak paylaşımı değiştirir (örneğin kayıt
+  LittleFS'ten SD'ye taşınınca).
+
+ESP-IDF VFS ile bağlanmış dosya sistemleri (`fs::FS` nesnesi olmayanlar,
+örneğin `esp_vfs_fat_sdspi_mount` ile `/sd`) mutlak VFS yoluyla paylaşılır:
+`probot::files::share("sd", "/sd/logs")`. Aynı kurallar geçerlidir;
+dosyalar POSIX çağrılarıyla (`opendir`, `stat`, `fopen`) okunur.
+
+`probot::files::unshare(ad)` paylaşımı kaldırır (yoksa `false`). Kaldırılan
+ya da değiştirilen paylaşımdan süren aktarım sonraki dosya çağrısında
+kesilir; `unshare()` ve değiştiren `share()` bunu en çok 1 s bekler.
+Takılan bir kart ya da okumayı bırakan bir tarayıcı aktarımı birkaç saniye
+daha sürdürebilir: `probot::files::busy()` herhangi bir paylaşımdan bir
+klasör ya da dosya hâlâ açıkken `true` döner. Dosya sistemini ayırmadan
+önce paylaşımı kaldırın ve `busy()` `false` olana dek bekleyin.
+`PROBOT_HAS_FILES_SHARE` bu özelliklerin varlığını derleme anında bildirir.
+
+Liste ve indirme yalnız robot boştayken (STOPPED/TRANSITION, bekleyen
+komut yok) çalışır; flash/SD okuması robot programıyla ve kontrol
+bağlantısıyla yarışmasın diye. Robot çalışırken 409 (PB-E409) döner ve
+kart bağlantıları pasifleşir. Acil durdurmadan sonra da 409 döner: durdurulan
+kullanıcı task'ı dosya sistemi ya da SPI kilidini tutuyor olabilir; kayıtlar
+yeniden başlatmadan sonra indirilir. Liste ve indirme ayrı, düşük öncelikli
+bir task'ta akar, DS bu sırada yanıt vermeye devam eder; aynı anda tek
+aktarım olur (ikincisine 503). INIT kabul edilirse süren aktarım kesilir
+(tarayıcı indirmeyi başarısız gösterir, yarım dosya bırakmaz). Büyüyen bir
+kayıt, açıldığı andaki boyutuyla gönderilir.
+
 ## Dashboard topic deposu (ileri seviye)
 
 Telemetri ve ayarlanabilir değerler (tunable) için adlı, tipli değerler.
@@ -455,7 +519,8 @@ yeniden gönderilir.
 
 `<probot/api.hpp>` WiFi/batarya makrosu istemez; sketch dışındaki `.cpp`
 dosyalarından eklenir. Durum, `probot::ds`, `probot::framework`, telemetri,
-gamepad/joystick tipleri, batarya okumaları ve sürüm makrolarını içerir. `<probot.h>` bunu da
+gamepad/joystick tipleri, batarya okumaları, dosya paylaşımı ve sürüm
+makrolarını içerir. `<probot.h>` bunu da
 ekler ve runtime'ı (WiFi AP, DS, `setup()`/`loop()`) kurar; yalnız sketch'te
 bir kez eklenir.
 
@@ -526,7 +591,7 @@ zamanı · **E4xx** protokol/HTTP (E409, HTTP 409'un karşılığıdır).
 | PB-E305 | Çalışma | E-stop'ta `stop()` hook'u `PROBOT_ESTOP_END_MS` içinde dönmedi → çip reboot |
 | PB-E306 | Çalışma | Batarya sensörüne (INA219/INA226) I2C'de ulaşılamıyor — arayüz "Veri yok"a düşer, bağlantı/adres kontrol edin |
 | PB-E307 | Çalışma | Açılışta `PROBOT_CONSOLE_BYTES` için bellek yok: konsol mesajda yazan boyutta bir tamponla çalışır (açılıştan önce yazılan satırlar için alınmış 4096 bayt ya da 2048); 0 ise konsol satırları düşer. Değeri küçültün |
-| PB-E409 | HTTP | Komut geçersiz evrede (409) — `mode`/`init`/`start`/`stop` evre kuralları |
+| PB-E409 | HTTP | Komut geçersiz evrede (409) — `mode`/`init`/`start`/`stop` evre kuralları; `/files` ve `/files/get` robot boşta değilken ya da acil durdurmadan sonra |
 
 ## Acil durdurma
 
@@ -577,6 +642,8 @@ yazacaksanız:
 | `/robotControl?cmd=mode&val=auto\|teleop\|utility` | GET | gerekli | STOPPED/TRANSITION'da modu (ve o modun tercih edilen OpMode seçeneğini) seçer; INIT/RUN'da 409. `utility` yalnız `util` true iken |
 | `/robotControl?cmd=opmode&id=N` | GET | gerekli | Listelenmiş bir OpMode seçeneğini (ve modunu) seçer; `id` ondalık metin. Listede yoksa 400, INIT/RUN'da 409 |
 | `/opmodes` | GET | gerekli | `{"options":[{"id":"101","mode":"auto","name":"Sol","group":"Otonom","description":"..."}]}`. `id` 64 bitlik olabildiği için metindir. Liste hiç verilmediyse `{"options":[]}`. Liste değişince `omv` artar; yanıt sırasında değişirse bağlantı kapanır, yeniden isteyin |
+| `/files` | GET | gerekli | `{"shares":[{"name":"logs","ok":true,"truncated":false,"files":[{"name":"a.wpilog","size":N,"mtime":T}]}]}`. `mtime` Unix saniye, bilinmiyorsa `0`; `ok` false = klasör açılamadı. Paylaşılan klasör yoksa her istemciye ve her evrede 404; robot boşta değilse 409 |
+| `/files/get?share=S&name=N` | GET | gerekli | Dosyanın içeriği (`application/octet-stream`, chunked). `name` `encodeURIComponent` ile kodlanır; `/`, `\`, `.` ve `..` reddedilir (400). Yoksa 404, robot boşta değilse 409, başka indirme sürerken 503 |
 | `/robotControl?cmd=init&autoLen=N` | GET | gerekli | Seçili modu INIT'e alır; yalnız STOPPED/TRANSITION |
 | `/robotControl?cmd=start&autoLen=N` | GET | gerekli | Seçili modu RUN'a alır; yalnız ilgili INIT fazı |
 | `/robotControl?cmd=stop` | GET | gerekli | INIT/RUN'dan (ya da kabul edilmiş ama henüz faza yansımamış bir INIT/START'tan) kooperatif stop; diğer durumlarda 409 |

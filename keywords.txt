@@ -88,6 +88,7 @@ requestStop	KEYWORD2
 currentAmps	KEYWORD2
 setLowVoltage	KEYWORD2
 isLowVoltage	KEYWORD2
+share	KEYWORD2
 attach	KEYWORD2
 detach	KEYWORD2
 write	KEYWORD2
@@ -99,6 +100,9 @@ println	KEYWORD2
 printf	KEYWORD2
 clearTelemetry	KEYWORD2
 console	KEYWORD1
+files	KEYWORD1
+unshare	KEYWORD2
+busy	KEYWORD2
 setActiveByName	KEYWORD2
 setColor	KEYWORD2
 setBrightness	KEYWORD2

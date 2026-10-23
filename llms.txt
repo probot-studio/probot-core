@@ -45,6 +45,15 @@ Rules that generated code MUST follow:
   (warnings, errors, events) go to the console:
   `probot::console::warning("battery %.1f V", v);` (`info`, `error` too),
   shown on the Logs page. Do not write to the console every loop.
+- To download files the program writes (logs) from the Driver Station,
+  mount the file system and call
+  `probot::files::share("logs", LittleFS, "/logs");` in a boot function
+  registered with
+  `static const bool kBoot = probot::framework::install({ &boot, nullptr, nullptr, nullptr });`
+  (never in `setup()`; Logs page, only while the robot is stopped). An ESP-IDF VFS mount is shared by its
+  path: `probot::files::share("sd", "/sd/logs");`. Sharing a name again
+  replaces it; `probot::files::unshare(name)` removes it. Before unmounting,
+  unshare and wait until `probot::files::busy()` is false.
 - Extra .cpp files include `<probot/api.hpp>` (config-free), never
   `<probot.h>`, which belongs to the sketch only.
 - To stop the running OpMode from code (for example on a fatal error),

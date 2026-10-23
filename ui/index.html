@@ -390,6 +390,11 @@
     .chart-head b{font:700 0.85rem var(--mono);font-variant-numeric:tabular-nums;color:var(--ink);}
     .chart-box canvas{width:100%;height:80px;display:block;}
     .console.tele-log{height:240px;flex:none;}
+    .files-share{font-size:.72rem;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:10px 0 2px;}
+    .files-row{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 12px;padding:7px 0;border-top:1px solid var(--line);font-size:.85rem;}
+    .files-row a{flex:1 1 220px;min-width:0;overflow-wrap:anywhere;color:var(--ink);font-weight:700;}
+    .files-row .meta{color:var(--muted);font-size:.75rem;font-variant-numeric:tabular-nums;}
+    .files-off .files-row a{pointer-events:none;opacity:.45;}
 
     /* eksen pad'leri */
     .pads{display:flex;gap:14px;justify-content:center;}
@@ -928,6 +933,16 @@
             </div>
             <div class="console tele-log" id="robotConsole" aria-live="polite"></div>
           </div>
+          <div class="widget" id="filesCard" style="grid-column:1/-1;" hidden>
+            <div class="tele-head">
+              <div class="w-head">Dosyalar</div>
+              <div class="tele-actions">
+                <button class="mini-btn" onclick="filesFetch()">Yenile</button>
+              </div>
+            </div>
+            <div id="filesList"></div>
+            <span class="hint" id="filesHint"></span>
+          </div>
           <div class="widget lg-wifi">
             <div class="w-head">WiFi Configuration</div>
             <div class="kv-grid">
@@ -1101,7 +1116,7 @@
     document.querySelectorAll('.nav-link').forEach(function(a){a.classList.remove('active');});
     var pg=$id('page-'+name); if(pg) pg.classList.add('active');
     var nv=document.querySelector('.nav-link[data-page="'+name+'"]'); if(nv) nv.classList.add('active');
-    if(name==='logs'){setTimeout(drawCharts,60);conUnread(0);}
+    if(name==='logs'){setTimeout(drawCharts,60);conUnread(0);filesFetch();}
     window.scrollTo({top:0,behavior:'smooth'});
   }
 
@@ -1301,6 +1316,78 @@
     /* TRANSITION (5) ve transition sonrası INIT: saat akmaya devam eder */
   }
 
+  /* ---- Files (Logs page) ----
+     Folders the robot program shared with probot::files::share(). The robot
+     lists and serves them only while it is idle (stopped, nothing pending),
+     so the links are disabled while a run is requested. */
+  var filesShown=false,filesRetry=false,filesBusy=false,filesWasIdle=null;
+  function filesIdle(){return !estopped&&(currentPhase===0||currentPhase===5)&&currentStatus===2;}
+  function filesSize(n){
+    if(n<1024) return n+' B';
+    if(n<1048576) return (n/1024).toFixed(1)+' KB';
+    return (n/1048576).toFixed(1)+' MB';
+  }
+  function filesLinks(idle){
+    $id('filesList').querySelectorAll('a').forEach(function(a){
+      a.setAttribute('aria-disabled',idle?'false':'true');a.tabIndex=idle?0:-1;
+    });
+  }
+  function filesSync(){
+    var idle=filesIdle();
+    $id('filesCard').classList.toggle('files-off',!idle);
+    filesLinks(idle);
+    // Refetch when the robot stops: after a refused or failed fetch too,
+    // so a listing replaces the card's hint.
+    if(idle&&filesWasIdle===false&&(filesShown||filesRetry)&&$id('page-logs').classList.contains('active')) filesFetch();
+    filesWasIdle=idle;
+  }
+  function filesFetch(){
+    if(filesBusy) return;
+    filesBusy=true;
+    var hint=$id('filesHint');
+    var ac=new AbortController();
+    var tid=setTimeout(function(){ac.abort();},10000);
+    fetch('/files',{signal:ac.signal}).then(function(r){
+      // 404: firmware without file sharing, or nothing shared. Any other reply means the
+      // robot shares folders, so the card shows its hint even before a first listing.
+      if(r.status===404){filesRetry=false;filesShown=false;$id('filesCard').hidden=true;$id('filesList').textContent='';hint.textContent='';return null;}
+      filesRetry=!r.ok;
+      if(!r.ok) $id('filesCard').hidden=false;
+      if(r.status===409){hint.textContent=estopped?'Acil durdurmadan sonra dosyalar robot yeniden başlatılınca indirilir.':'Robot çalışırken dosyalar listelenemez; durdurunca yenileyin.';return null;}
+      if(r.status===403){hint.textContent='Robotu başka bir sürücü istasyonu kullanıyor; dosyalar oradan indirilir.';return null;}
+      if(r.status===503){hint.textContent='Bir dosya aktarımı sürüyor; bitince yenileyin.';return null;}
+      if(!r.ok) throw new Error(r.status);
+      return r.json();
+    }).then(function(j){
+      clearTimeout(tid);filesBusy=false;
+      if(!j) return;
+      var list=$id('filesList');list.textContent='';
+      var shares=Array.isArray(j.shares)?j.shares:[];
+      filesShown=shares.length>0;
+      $id('filesCard').hidden=!filesShown;
+      var notes=[];
+      shares.forEach(function(sh){
+        var h=document.createElement('div');h.className='files-share';h.textContent=sh.name;list.appendChild(h);
+        if(!sh.ok){notes.push(sh.name+': klasör açılamadı');return;}
+        var files=(sh.files||[]).slice().sort(function(a,b){return (b.mtime-a.mtime)||(a.name<b.name?-1:1);});
+        if(!files.length&&!sh.truncated) notes.push(sh.name+': dosya yok');
+        if(sh.truncated) notes.push(sh.name+': ilk '+files.length+' dosya gösteriliyor');
+        files.forEach(function(f){
+          var row=document.createElement('div');row.className='files-row';
+          var a=document.createElement('a');
+          a.href='/files/get?share='+encodeURIComponent(sh.name)+'&name='+encodeURIComponent(f.name);
+          a.download=f.name;a.textContent=f.name;
+          a.addEventListener('click',function(e){if(!filesIdle()) e.preventDefault();});
+          var m=document.createElement('span');m.className='meta';
+          m.textContent=filesSize(f.size)+(f.mtime>0?' · '+new Date(f.mtime*1000).toLocaleString():'');
+          row.appendChild(a);row.appendChild(m);list.appendChild(row);
+        });
+      });
+      filesLinks(filesIdle());
+      hint.textContent=notes.join(' · ');
+    }).catch(function(){clearTimeout(tid);filesBusy=false;filesRetry=true;hint.textContent='Dosya listesi alınamadı.';});
+  }
+
   /* ---- STATE RENDER ---- */
   var PHASE_EVENT=['Stopped','Auto Init','Autonomous','TeleOp Init','TeleOp','Transition','Utility Init','Utility'];
   function applyState(data){
@@ -1329,6 +1416,7 @@
       evlog('info','Phase: '+(PHASE_EVENT[currentPhase]||currentPhase));
       clockOnPhase(prevPhase,currentPhase);
     }
+    filesSync();
 
     /* süre girişi: kullanıcı elledikten sonra robot teyit edene dek üstüne yazma */
     var autoPeriodEl=$id('autoPeriod');

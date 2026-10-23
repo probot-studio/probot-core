@@ -119,6 +119,17 @@ Biçim [Keep a Changelog](https://keepachangelog.com/), sürümler
   `battery::setLowVoltage(volts)` and `battery::isLowVoltage()` give a
   low-battery flag on the voltage the Driver Station shows (off by
   default).
+- `probot::files::share(name, fs, dir)`: the Driver Station lists and
+  downloads the files of up to 4 folders on LittleFS, SD or any Arduino
+  file system (Logs page, "Dosyalar"), only while the robot is idle (not
+  after an e-stop). `share(name, vfsDir)` shares a folder of an ESP-IDF
+  VFS mount by its absolute path. Sharing a name again replaces it, and
+  `unshare(name)` removes it; a running transfer of that share stops.
+  `busy()` tells whether a transfer still holds a file, for a sketch that
+  unmounts afterwards (unshare() waits for it at most 1 s).
+  `PROBOT_HAS_FILES_SHARE` marks the feature. A low-priority task does
+  the file system work, one transfer at a time. New endpoints `/files` and
+  `/files/get`.
 
 ### Changed
 - Dashboard schemas have their own size limit, `PROBOT_DASH_MAX_SCHEMA_BYTES`

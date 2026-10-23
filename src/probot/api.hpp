@@ -19,3 +19,4 @@
 #include <probot/ds.hpp>
 #include <probot/framework.hpp>
 #include <probot/dashboard/dashboard.hpp>
+#include <probot/files/files.hpp>
