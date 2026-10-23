@@ -58,6 +58,14 @@ Biçim [Keep a Changelog](https://keepachangelog.com/), sürümler
   an `Alerts` list (`errors` / `warnings` / `infos`) and WPILib field order
   for `PIDController` folders; a tunable PID also shows `measurement` and
   `error` from its `/Telemetry` twin.
+- Driver Station "Veri" page widgets for the WPILib 2027 layouts:
+  `Scheduler` (running commands, with a cancel button that writes the
+  command id to a tunable `Cancel`), `Field2d` (`struct:Pose2d[]` objects
+  drawn on a field view that grows to fit, with each pose or the pose
+  count, first and last point as text; writable objects take typed
+  poses, and up to 8 poses can be dragged) and `Mechanism2d` (roots with
+  `position`, nested ligaments drawn on a canvas, described in its
+  accessible label).
 - OpMode list: `probot::ds::setOpModeOptions()` publishes named options
   (id, mode, name, group, description) for the Driver Station, which shows
   a selector for the selected mode and sends `cmd=opmode&id=N`;
