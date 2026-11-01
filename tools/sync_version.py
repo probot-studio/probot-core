@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Synchronise project version across metadata files.
 
-Reads the semver string from VERSION and ensures both library.properties
-and library.json expose the same value. The script is idempotent and only
+Reads the semver string from VERSION and ensures library.properties,
+library.json, idf_component.yml, the doc headers and src/probot/version.hpp
+expose the same value. The script is idempotent and only
 touches the files when an update is required.
 """
 
@@ -146,6 +147,28 @@ def update_doc_headers(root: Path, version: str) -> bool:
     return changed
 
 
+def update_version_header(path: Path, version: str) -> bool:
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.+-]+)?", version)
+    if not match:
+        raise VersionSyncError(f"VERSION {version!r} is not MAJOR.MINOR.PATCH[-pre][+build]")
+    major, minor, patch = match.groups()
+    content = (
+        "#pragma once\n"
+        "// Generated from VERSION by tools/sync_version.py. Do not edit.\n"
+        f"#define PROBOT_VERSION_MAJOR {major}\n"
+        f"#define PROBOT_VERSION_MINOR {minor}\n"
+        f"#define PROBOT_VERSION_PATCH {patch}\n"
+        f'#define PROBOT_VERSION_STRING "{version}"\n'
+        "// Comparable as one number: PROBOT_VERSION >= PROBOT_VERSION_OF(0, 5, 0)\n"
+        "#define PROBOT_VERSION_OF(major, minor, patch) ((major) * 10000 + (minor) * 100 + (patch))\n"
+        "#define PROBOT_VERSION PROBOT_VERSION_OF(PROBOT_VERSION_MAJOR, PROBOT_VERSION_MINOR, PROBOT_VERSION_PATCH)\n"
+    )
+    if path.exists() and path.read_text(encoding="utf-8") == content:
+        return False
+    path.write_text(content, encoding="utf-8")
+    return True
+
+
 def main() -> int:
     root = Path(__file__).resolve().parent.parent
     version_path = root / "VERSION"
@@ -162,7 +185,9 @@ def main() -> int:
 
     docs_changed = update_doc_headers(root, version)
 
-    if props_changed or json_changed or idf_changed or docs_changed:
+    header_changed = update_version_header(root / "src" / "probot" / "version.hpp", version)
+
+    if props_changed or json_changed or idf_changed or docs_changed or header_changed:
         sys.stdout.write(f"Version metadata synced to {version}\n")
     return 0
 

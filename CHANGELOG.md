@@ -64,6 +64,12 @@ _(boş — 0.4.0 sonrası değişiklikler buraya)_
   telemetri/Serial uyarıları, HTTP 409 gövdeleri ve arayüz bantları artık
   kod + `docs/hatalar#pb-eXX` çapası taşır; arayüze görünür PB-E301 stall
   bandı eklendi. Kayıt tablosu: API.md "Hata kodları".
+- **Version macros.** `<probot.h>` defines `PROBOT_VERSION_MAJOR`,
+  `_MINOR`, `_PATCH`, `PROBOT_VERSION_STRING`, `PROBOT_VERSION` (one number,
+  400 for 0.4.0) and `PROBOT_VERSION_OF(major, minor, patch)`, generated from
+  `VERSION` into `<probot/version.hpp>` by `tools/sync_version.py`; CI fails
+  on drift. Code generators can reject an older library with a clear
+  message: `#if !defined(PROBOT_VERSION) || PROBOT_VERSION < 400`.
 
 ### Değişti
 - **DS arayüzü Probot marka renklerine geçti** (eski NFR lacivert/buz paleti

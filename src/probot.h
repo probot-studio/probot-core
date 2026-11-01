@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include <probot/version.hpp>
 
 // FTC-style user OpMode hooks. The recurring loop and stop hooks are required:
 // omitting any one produces a linker error. INIT-loop and START are advanced,
