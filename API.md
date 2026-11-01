@@ -209,6 +209,24 @@ Protokolde `Phase` sayıları sabittir:
 `Status::INIT` (0), `Status::START` (1), `Status::STOP` (2) taşır. Gerçek,
 hook'u tamamlanmış evre için daima `phase` kullanılmalıdır.
 
+## Sürüm makroları
+
+`<probot.h>` kütüphanenin sürümünü derleme anında bildirir (0.4.0'dan beri):
+`PROBOT_VERSION_MAJOR`, `PROBOT_VERSION_MINOR`, `PROBOT_VERSION_PATCH`,
+`PROBOT_VERSION_STRING` (`"0.4.0"`) ve tek sayı olarak `PROBOT_VERSION`
+(`major * 10000 + minor * 100 + patch`; 0.4.0 için `400`).
+`PROBOT_VERSION_OF(major, minor, patch)` aynı sayıyı üretir.
+
+Daha eski bir kütüphanede de derlenmesi gereken kontrolde düz sayı kullanın:
+0.3.x'te `PROBOT_VERSION_OF` tanımsızdır ve `#if` içinde derleme hatası verir.
+
+```cpp
+#include <probot.h>
+#if !defined(PROBOT_VERSION) || PROBOT_VERSION < 400
+#error "probot-core 0.4.0 veya üstü gerekli: Kütüphane Yöneticisi'nden güncelleyin"
+#endif
+```
+
 ## Yapılandırma makroları
 
 Tamamı `#include <probot.h>`'den **önce** tanımlanır. Tablo:

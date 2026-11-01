@@ -34,6 +34,10 @@ Rules that generated code MUST follow:
   not analogWrite (1 kHz can't make a 50 Hz servo frame).
 - initLoop/loop hooks are called repeatedly (~50 Hz); do not write infinite
   loops or block longer than 2 s inside them.
+- Library version at compile time: `PROBOT_VERSION` (400 for 0.4.0) and
+  `PROBOT_VERSION_STRING`. To require a version, compare plain numbers
+  after `#include <probot.h>`: `#if !defined(PROBOT_VERSION) ||
+  PROBOT_VERSION < 400` (`PROBOT_VERSION_OF` is missing on 0.3.x).
 - Telemetry to the driver station panel: `probot::printf("v=%.2f\n", v);`
 - Inputs auto-zero 500 ms after the link drops — driving motors directly
   from axis values is safe.
