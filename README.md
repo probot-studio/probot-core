@@ -100,6 +100,7 @@ void autonomousStop() {}           // stop safely every time Auto is left
 | `JoystickTest` | Prints axis/button values to Serial and the telemetry panel. Good first test. |
 | `TankDrive` | Two-motor tank drive (BTS7960/IBT-2 style driver). A template for motor code. |
 | `ServoTest` | Servo control from the joystick: the correct jitter-free way to drive servos. |
+| `AutonomousChooser` | Several autonomous routines in one firmware; pick one from the Driver Station before START. Guide: `docs/guides/autochooser-tr.md`. |
 
 ## Configuration macros
 

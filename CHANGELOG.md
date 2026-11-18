@@ -8,7 +8,24 @@ Biçim [Keep a Changelog](https://keepachangelog.com/), sürümler
 
 ## [Unreleased]
 
-_(boş — 0.4.0 sonrası değişiklikler buraya)_
+### Added
+
+- Autonomous routine chooser: register up to 8 autonomous routines in the
+  optional `autonomousConfigure()` hook with
+  `probot::autonomous::addRoutine(id, label, start, loop, isDefault)` and pick
+  one from the Driver Station before START. The routine's `start` and `loop`
+  replace `autonomousStart()`/`autonomousLoop()`; `autonomousInit()` and
+  `autonomousStop()` still run. The selection is stored in NVS and restored
+  after a reset or brownout (an id missing from the new catalog falls back to
+  the default) and is locked from START until the run ends.
+- Protocol: `/robotControl?cmd=selectAuto&autoId=<id>`, `GET /getAutoModes`,
+  and the `autoChooser`, `autoChooserError`, `selectedAutoId` fields in
+  `/getState` and the `S` frame. With a catalog, an autonomous
+  `cmd=start` must carry the matching `autoId`.
+- PB-E309: the autonomous routine catalog was rejected. The first error code
+  and routine id are logged and shown in the Driver Station and
+  `/getAutoModes`; autonomous START is refused, teleop is unaffected.
+- `examples/AutonomousChooser` and `docs/guides/autochooser-tr.md`.
 
 ## [0.4.0] — Probot Studio Uyumu — 2026-07-17
 

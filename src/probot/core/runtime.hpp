@@ -7,6 +7,7 @@
 #include <probot/core/lifecycle.hpp>
 #include <probot/core/status_led.hpp>
 #include <probot/io/battery.hpp>
+#include <probot/robot/autonomous.hpp>
 
 // Driver-station inactivity → STOP (1, default, safe) or just disconnect (0).
 #ifndef PROBOT_DS_TIMEOUT_MS
@@ -92,13 +93,27 @@ namespace probot {
 
     inline void emptyHook() {}
 
+    // With an autonomous routine catalog the latched routine replaces
+    // autonomousStart()/autonomousLoop(); autonomousInit/InitLoop/Stop stay
+    // the sketch's own (shared preparation and the safe stop).
+    inline void autonomousStartHook(){
+      probot::autonomous::registry().dispatchStart(::autonomousStart ? &::autonomousStart : &emptyHook);
+    }
+    inline void autonomousLoopHook(){
+      probot::autonomous::registry().dispatchLoop(&::autonomousLoop);
+    }
+    inline void autonomousStopHook(){
+      ::autonomousStop();
+      probot::autonomous::registry().endRun();
+    }
+
     inline core::Hooks userHooks(){
       return core::Hooks{
         ::autonomousInit ? &::autonomousInit : &emptyHook,
         ::autonomousInitLoop ? &::autonomousInitLoop : &emptyHook,
-        ::autonomousStart ? &::autonomousStart : &emptyHook,
-        &::autonomousLoop,
-        &::autonomousStop,
+        &autonomousStartHook,
+        &autonomousLoopHook,
+        &autonomousStopHook,
         ::teleopInit ? &::teleopInit : &emptyHook,
         ::teleopInitLoop ? &::teleopInitLoop : &emptyHook,
         ::teleopStart ? &::teleopStart : &emptyHook,
@@ -313,6 +328,24 @@ namespace probot {
 #endif
 
     wdt_init_no_idle(PROBOT_WDT_TIMEOUT_S, true);
+
+    // Register the autonomous routine catalog before the Driver Station
+    // starts, so the DS can list it (and restore a saved selection) while the
+    // robot is still stopped. Sketches without the hook keep their
+    // autonomousStart()/autonomousLoop().
+    if (autonomousConfigure) {
+      auto& autos = probot::autonomous::registry();
+      autos.beginRegistration();
+      autonomousConfigure();
+      autos.finishRegistration();
+      const auto snap = autos.snapshot();
+      if (snap.error != probot::autonomous::RegistrationError::NONE) {
+        Serial.printf("[PB-E309] Autonomous routine catalog rejected (%s '%s'): autonomous START is refused - docs/hatalar#pb-e309\n",
+                      probot::autonomous::errorCode(snap.error), snap.errorId);
+      } else {
+        Serial.printf("[AUTO ] %u autonomous routine(s) registered\n", (unsigned)snap.count);
+      }
+    }
 
 #ifdef ESP32
     probot::driverstation::start_driver_station();

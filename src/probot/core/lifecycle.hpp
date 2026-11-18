@@ -107,6 +107,13 @@ namespace probot::core {
     return isActivePhase(phase) || status != robot::Status::STOP;
   }
 
+  // An autonomous routine may be selected while no OpMode runs and no START
+  // is pending: STOPPED, TRANSITION, or INIT before Start. START latches the
+  // selection for the whole run.
+  inline bool canAcceptAutoSelect(robot::Phase phase, robot::Status status) {
+    return !isRunPhase(phase) && status != robot::Status::START;
+  }
+
   // Input gate shared by the WebSocket and HTTP joystick paths: controller
   // input reaches user code only in a started RUN phase that is not stalled.
   inline bool inputsEnabled(const robot::StateSnapshot& s) {

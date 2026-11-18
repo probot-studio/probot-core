@@ -85,6 +85,52 @@ deadline'ına tabidir.
 `autonomousStart()` / `teleopStart()` START anındaki bir kerelik zaman damgası
 veya state reset işi içindir. Çoğu robotta `loop()`un ilk turu yeterlidir.
 
+### Otonom rutin seçici
+
+Firmware'e birden fazla otonom rutin derleyip Driver Station'dan birini
+seçmek için opsiyonel `autonomousConfigure()` hook'unda bir katalog
+kaydedin. Hook açılışta, DS başlamadan önce bir kez çalışır. Ayrıntılı
+rehber: `docs/guides/autochooser-tr.md`, örnek: `examples/AutonomousChooser`.
+
+```cpp
+void autonomousConfigure() {
+  // id, DS'te görünen ad, start, loop, varsayılan mı
+  probot::autonomous::addRoutine("left", "Soldan başlangıç", leftStart, leftLoop, true);
+  probot::autonomous::addRoutine("right", "Sağdan başlangıç", rightStart, rightLoop);
+  // Kısa form: ad hem id hem görünen ad olur
+  probot::autonomous::addRoutine("CenterAuto", centerStart, centerLoop);
+}
+```
+
+| Fonksiyon | Açıklama |
+|---|---|
+| `bool addRoutine(id, label, start, loop, isDefault=false)` | Rutin ekler; geçersizse `false` döner ve katalog hatalı sayılır |
+| `bool addRoutine(name, start, loop, isDefault=false)` | Kısa form: `name` hem id hem görünen ad, **id kurallarına uymalı** |
+| `void clearRoutines()` | Kataloğu (ve kayıt hatasını) temizler |
+
+- **id:** benzersiz, en fazla **15 karakter**, yalnız ASCII harf, rakam, `-`,
+  `_`. **Boşluk ve Türkçe karakter olmaz** (`"Sol Otonom"`, `"SolBaşlangıç"`
+  geçersiz). Büyük/küçük harf ayrıdır.
+- **Görünen ad:** boş olamaz, en fazla 31 bayt (Türkçe harf 2 bayt),
+  kontrol karakteri içeremez. En fazla **8 rutin**.
+- Rutinin `start`'ı START anında bir kez (`autonomousStart()` yerine),
+  `loop`'u koşu boyunca her turda (`autonomousLoop()` yerine) çalışır.
+  `autonomousInit()`/`autonomousInitLoop()` (ortak hazırlık) ve
+  `autonomousStop()` (güvenli duruş) her rutin için yine çağrılır.
+  Katalog varken `autonomousStart()`/`autonomousLoop()` çağrılmaz ama
+  `autonomousLoop()` yine tanımlanmalıdır.
+- Seçim robot dururken, mod geçişinde ya da INIT sonrasında Start'tan önce
+  yapılır; koşu sırasında ve Start kabul edildikten sonra reddedilir
+  (PB-E409). Start'ta seçili rutin koşu sonuna kadar sabitlenir.
+- Seçim NVS'e yazılır; reset/brownout sonrası geri yüklenir. Kayıtlı id
+  yeni katalogda yoksa varsayılan rutine dönülür.
+- Varsayılan yoksa DS'ten seçim yapılmadan otonom Start reddedilir.
+- Tek bir hatalı kayıt kataloğun tamamını geçersiz kılar: otonom Start
+  reddedilir (PB-E309), teleop etkilenmez. İlk hatanın kodu ve id'si seri
+  monitörde, DS'te ve `/getAutoModes`'ta görünür: `invalid_id`,
+  `invalid_label`, `missing_callback`, `duplicate_id`, `multiple_defaults`,
+  `too_many_routines`.
+
 ## Joystick
 
 ```cpp
@@ -251,7 +297,8 @@ zamanı · **E4xx** protokol/HTTP (E409, HTTP 409'un karşılığıdır).
 | PB-E304 | Çalışma | DS bağlantısı koptu → joystick nötr, yeniden bağlanma bekleniyor (`FORCE_STOP=0`) |
 | PB-E305 | Çalışma | E-stop'ta `stop()` hook'u `PROBOT_ESTOP_END_MS` içinde dönmedi → çip reboot |
 | PB-E306 | Çalışma | Batarya sensörüne (INA219/INA226) I2C'de ulaşılamıyor — arayüz "Veri yok"a düşer, bağlantı/adres kontrol edin |
-| PB-E409 | HTTP | Komut geçersiz evrede (409) — `mode`/`init`/`start`/`stop` evre kuralları |
+| PB-E309 | Çalışma | Otonom rutin kataloğu reddedildi: bir `addRoutine` kaydı geçersiz (hata kodu ve id seri monitörde, DS'te ve `/getAutoModes`'ta). Otonom Start reddedilir; kaydı düzeltip yeniden yükleyin |
+| PB-E409 | HTTP | Komut geçersiz evrede (409): `mode`/`init`/`start`/`stop`/`selectAuto` evre kuralları; katalog varken otonom Start'ta seçili rutin yok ya da `autoId` robottaki seçimle uyuşmuyor |
 
 ## Acil durdurma
 
@@ -289,12 +336,14 @@ yazacaksanız:
 | `/updateController` | POST | gerekli | JSON fallback: `{"axes":[...],"buttons":[...]}` — WS koptuğunda |
 | `/robotControl?cmd=mode&val=auto\|teleop` | GET | gerekli | STOPPED/TRANSITION'da OpMode seçer; INIT/RUN'da 409 |
 | `/robotControl?cmd=init&autoLen=N` | GET | gerekli | Seçili modu INIT'e alır; yalnız STOPPED/TRANSITION |
-| `/robotControl?cmd=start&autoLen=N` | GET | gerekli | Seçili modu RUN'a alır; yalnız ilgili INIT fazı |
+| `/robotControl?cmd=start&autoLen=N` | GET | gerekli | Seçili modu RUN'a alır; yalnız ilgili INIT fazı. Otonom rutin kataloğu varken otonom Start'ta `&autoId=<id>` şart: robottaki seçimle aynı olmalı (değilse ya da seçim yoksa 409 PB-E409; katalog hatalıysa 409 PB-E309) |
+| `/robotControl?cmd=selectAuto&autoId=<id>` | GET | gerekli | Otonom rutini seçer ve NVS'e yazar. Dönüş: `{"ok":true,"selectedAutoId":"<id>","saved":b}` (`saved:false` = NVS yazılamadı, seçim yine geçerli). Koşu sırasında ya da Start kabul edildikten sonra 409 PB-E409; katalog yoksa ya da id bilinmiyorsa 400; katalog hatalıysa 409 PB-E309 |
+| `/getAutoModes` | GET | gerekli | Rutin kataloğu: `{"supported":b,"registrationError":b,"error":null\|{"code":s,"id":s},"selected":s\|null,"active":s\|null,"modes":[{"id":s,"label":s,"default":b}]}`. `active`: koşuda sabitlenmiş rutin |
 | `/robotControl?cmd=stop` | GET | gerekli | INIT/RUN'dan (ya da kabul edilmiş ama henüz faza yansımamış bir INIT/START'tan) kooperatif stop; diğer durumlarda 409 |
 | `/robotControl?cmd=estop` | GET | gerekli | **Acil durdurma**: kullanıcı task'ı öldürülür, aktif `stop()` watchdog'lu (`PROBOT_ESTOP_END_MS`) çalışır, enable pini kesilir, robot reboot'a kadar kilitlenir |
 | `/robotControl?cmd=reboot` | GET | gerekli | Çipi yeniden başlatır (`ESP.restart()`) — estop kilidini temizlemenin yolu |
 | `/setChannel?ch=N` | GET | gerekli | Kanalı NVS'e kaydet; 1-13 ise CSA ile **canlı** geçiş (zaten o kanaldaysa `live:false`), `0` = kaydı temizle, açılışta firmware varsayılanına dön. Dönüş: `{"ok":b,"ch":N,"live":b}` |
-| `/getState` | GET | gerekli | `{"status":N,"phase":N,"selectedMode":"auto|teleop","autoPeriodSeconds":N,"autoRemainingMs":N,"batt":V.V,"estop":b}` (WS yokken fallback). `batt`: pil gerilimi (bölücü/INA otomatik ya da `setBatteryVoltage()` elle), `0.0` = veri yok |
+| `/getState` | GET | gerekli | `{"status":N,"phase":N,"selectedMode":"auto|teleop","autoPeriodSeconds":N,"autoRemainingMs":N,"batt":V.V,"estop":b,"autoChooser":b,"autoChooserError":b,"selectedAutoId":"<id>"}` (WS yokken fallback). `autoChooser`: rutin kataloğu var, `selectedAutoId`: seçili rutin (`""` = yok); listenin kendisi `/getAutoModes`'ta. `batt`: pil gerilimi (bölücü/INA otomatik ya da `setBatteryVoltage()` elle), `0.0` = veri yok |
 | `/telemetry` | GET | gerekli | Telemetri tamponunun içeriği (text) (WS yokken fallback) |
 | `/getBattery` | GET | serbest | Pil gerilimi (kaynak: `PROBOT_BATTERY_ADC_PIN` bölücü, `PROBOT_BATTERY_INA` sensörü ya da elle `probot::setBatteryVoltage()`) |
 | `/health` | GET | serbest | `{"rssi":N,"up":ms,"heap":N,"dm":b,"joyAgeMs":N,"sta":N,"disc":N}` — izleme/hakem için. `joyAgeMs`: son joystick paketinin yaşı (-1 = hiç gelmedi), `sta`: bağlı istemci sayısı, `disc`: son kopuşun IEEE reason kodu |
@@ -333,7 +382,8 @@ Robot → istemci (push):
           (250 ms), değişiklik yoksa en geç ~1.25 sn'de bir (heartbeat
           görevi de görür). Alanlar /getState + /health birleşimi
           (`estop` alanı dahil: acil durdurma kilidi; `batt` alanı
-          dahil: pil gerilimi, 0.0 = veri yok).
+          dahil: pil gerilimi, 0.0 = veri yok; `autoChooser`,
+          `autoChooserError`, `selectedAutoId` dahil: rutin seçici).
 'T' 0x54  telemetri tamponu (text) — içerik değiştiğinde
 ```
 

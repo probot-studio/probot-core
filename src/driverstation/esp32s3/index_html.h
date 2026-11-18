@@ -277,6 +277,11 @@ const char MAIN_page[] PROGMEM = R"=====(
 
     /* teleop modunda otonom kartı söner */
     .auto-card.dim .stepper,.auto-card.dim .countdown,.auto-card.dim .step-lbl{opacity:.4;pointer-events:none;}
+    /* otonom rutin seçici: yalnız sketch bir katalog kaydettiyse görünür */
+    .ac-routine{display:flex;flex-direction:column;gap:6px;}
+    .ac-routine[hidden]{display:none;}
+    .ac-note{font-size:0.72rem;color:var(--muted);}
+    .ac-note.err{color:#b42318;font-weight:700;}
     .field{background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:9px 11px;display:flex;flex-direction:column;gap:6px;}
     .field label{font-size:0.64rem;font-weight:800;letter-spacing:0.07em;text-transform:uppercase;color:var(--muted);}
     .countdown{background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:9px 11px;display:flex;flex-direction:column;gap:7px;}
@@ -766,6 +771,11 @@ const char MAIN_page[] PROGMEM = R"=====(
 
               <!-- ortak: otonom süresi + geri sayım -->
               <div class="auto-card" id="autoCard">
+                <div class="ac-routine" id="autoRoutineRow" hidden>
+                  <label class="step-lbl" for="autoRoutine">Otonom rutini</label>
+                  <select id="autoRoutine"></select>
+                  <div class="ac-note" id="autoRoutineNote" aria-live="polite"></div>
+                </div>
                 <div class="ac-row">
                   <span class="step-lbl">Autonomous süresi</span>
                   <div class="stepper">
@@ -1187,6 +1197,7 @@ const char MAIN_page[] PROGMEM = R"=====(
     currentPhase=typeof data.phase==='number'?data.phase:0;
     currentStatus=typeof data.status==='number'?data.status:currentStatus;
     selectedMode=data.selectedMode==='auto'?'auto':'teleop';
+    syncAutoChooser(data);
 
     if(currentPhase!==prevPhase){
       evlog('info','Phase: '+(PHASE_EVENT[currentPhase]||currentPhase));
@@ -1256,13 +1267,15 @@ const char MAIN_page[] PROGMEM = R"=====(
       en.disabled=(currentStatus!==2); // INIT yalnız STOP durumunda kabul edilir
     }else if(inInit){
       en.textContent='Start';
-      en.disabled=(currentStatus!==0); // START kabul edildiyse ikinciyi kilitle
+      en.disabled=(currentStatus!==0) // START kabul edildiyse ikinciyi kilitle
+        ||(currentPhase===1&&autoChooserBlocksStart()); // otonom: teyitli rutin şart
     }else{
       en.textContent='Start';
       en.disabled=true;
     }
     var stopOk=inInit||inRun||currentStatus!==2; // firmware canAcceptStop: an accepted INIT/START is still pending
     $id('mcDisable').disabled=!stopOk;
+    renderAutoRoutine();
 
     /* sürüş ekranındaki maç kontrolü ana kontrollerin aynasıdır */
     var drvInit=$id('drvInit');
@@ -1275,9 +1288,110 @@ const char MAIN_page[] PROGMEM = R"=====(
     });
   }
 
+  /* ---- OTONOM RUTİN SEÇİCİ ----
+     Katalog firmware'de boot'ta kaydedilir (/getAutoModes). Seçim robota
+     gönderilir ve robot teyit edince geçerli olur (NVS'e de yazılır);
+     Start teyitli rutinin id'sini taşır. */
+  var autoChooser={inUse:false,error:null,modes:[],confirmed:'',busy:false,loading:false,loaded:false};
+  var AUTO_ERR={invalid_id:'geçersiz kimlik',invalid_label:'geçersiz görünen ad',missing_callback:'eksik callback',
+    duplicate_id:'tekrarlanan kimlik',multiple_defaults:'birden fazla varsayılan',too_many_routines:'8 rutin sınırı aşıldı'};
+  function autoRoutineLabel(id){
+    for(var i=0;i<autoChooser.modes.length;i++) if(autoChooser.modes[i].id===id) return autoChooser.modes[i].label;
+    return null;
+  }
+  function autoChooserBlocksStart(){
+    return autoChooser.inUse&&(!!autoChooser.error||!autoChooser.confirmed||autoChooser.busy);
+  }
+  function renderAutoRoutine(){
+    var row=$id('autoRoutineRow');
+    row.hidden=!autoChooser.inUse;
+    if(!autoChooser.inUse) return;
+    var sel=$id('autoRoutine'), note=$id('autoRoutineNote');
+    if(!autoChooser.busy) sel.value=autoChooser.confirmed;
+    var running=(currentPhase===2||currentPhase===4||currentStatus===1);
+    sel.disabled=!!autoChooser.error||autoChooser.busy||running||estopped;
+    var msg='', err=false;
+    if(autoChooser.error){
+      var e=autoChooser.error;
+      msg='Rutin kataloğu hatalı ('+(AUTO_ERR[e.code]||e.code)+(e.id?': '+e.id:'')+'). Sketch\'i düzeltip yükleyin; otonom başlatılamaz (PB-E309).';
+      err=true;
+    }else if(autoChooser.busy) msg='Seçim gönderiliyor...';
+    else if(!autoChooser.confirmed){msg='Otonom Start için bir rutin seçin.';err=true;}
+    else msg='Seçili: '+(autoRoutineLabel(autoChooser.confirmed)||autoChooser.confirmed)+(running?' (koşu boyunca kilitli)':'');
+    note.textContent=msg;
+    note.classList.toggle('err',err);
+  }
+  function loadAutoModes(){
+    if(autoChooser.loading) return;
+    autoChooser.loading=true;
+    var ac=new AbortController();
+    var tid=setTimeout(function(){ac.abort();},3000);
+    fetch('/getAutoModes',{signal:ac.signal,cache:'no-store'}).then(function(r){
+      clearTimeout(tid);
+      if(!r.ok) throw new Error(r.status);
+      return r.json();
+    }).then(function(d){
+      autoChooser.loading=false;
+      autoChooser.loaded=true;
+      autoChooser.inUse=(d.supported===true);
+      autoChooser.error=(d.registrationError===true)?(d.error||{code:'unknown',id:''}):null;
+      autoChooser.modes=Array.isArray(d.modes)?d.modes:[];
+      autoChooser.confirmed=(typeof d.selected==='string')?d.selected:'';
+      var sel=$id('autoRoutine');
+      sel.innerHTML='';
+      var ph=document.createElement('option');
+      ph.value='';ph.textContent='Rutin seçin';ph.disabled=true;
+      sel.appendChild(ph);
+      autoChooser.modes.forEach(function(m){
+        var o=document.createElement('option');
+        o.value=m.id;o.textContent=m.label+(m.default?' (varsayılan)':'');
+        sel.appendChild(o);
+      });
+      if(autoChooser.error) evlog('err','Otonom rutin kataloğu hatalı: '+autoChooser.error.code+(autoChooser.error.id?' ('+autoChooser.error.id+')':''));
+      renderMC();
+    }).catch(function(){autoChooser.loading=false;});
+  }
+  /* S frame / getState: katalog değiştiyse (başka sketch yüklendi, hata
+     çıktı) listeyi yeniden çek; yoksa yalnız teyitli seçimi güncelle. */
+  function syncAutoChooser(data){
+    if(typeof data.autoChooser!=='boolean') return;
+    var err=(data.autoChooserError===true);
+    var sid=(typeof data.selectedAutoId==='string')?data.selectedAutoId:'';
+    if(!autoChooser.loaded||data.autoChooser!==autoChooser.inUse||err!==!!autoChooser.error||
+       (sid&&autoRoutineLabel(sid)===null)){
+      if(data.autoChooser||autoChooser.inUse) loadAutoModes();
+      return;
+    }
+    if(!autoChooser.busy) autoChooser.confirmed=sid;
+  }
+  function selectAutoRoutine(id){
+    if(autoChooser.busy||!id||id===autoChooser.confirmed) return;
+    autoChooser.busy=true;
+    renderMC();
+    var ac=new AbortController();
+    var tid=setTimeout(function(){ac.abort();},3000);
+    fetch('/robotControl?cmd=selectAuto&autoId='+encodeURIComponent(id),{signal:ac.signal}).then(function(r){
+      clearTimeout(tid);
+      if(!r.ok) return r.text().then(function(t){throw new Error(r.status+' '+t);});
+      return r.json();
+    }).then(function(d){
+      autoChooser.confirmed=d.selectedAutoId||'';
+      evlog('info','Otonom rutini: '+(autoRoutineLabel(autoChooser.confirmed)||autoChooser.confirmed)+(d.saved===false?' (kalıcı kayıt başarısız)':''));
+    }).catch(function(err){
+      evlog('warn','Rutin seçilemedi: '+err.message);
+      fetchState();
+    }).then(function(){
+      autoChooser.busy=false;
+      renderMC();
+    });
+  }
+  $id('autoRoutine').addEventListener('change',function(e){selectAutoRoutine(e.target.value);});
+
   function sendMatchCommand(cmd){
     var autoLen=Math.round(Math.max(0,parseFloat($id('autoPeriod').value)||0)); // firmware tam sayı
     var url='/robotControl?cmd='+cmd+'&autoLen='+autoLen;
+    /* robot, sayfanın gösterdiği rutini doğrular; farklıysa START'ı reddeder */
+    if(cmd==='start'&&selectedMode==='auto'&&autoChooser.inUse) url+='&autoId='+encodeURIComponent(autoChooser.confirmed);
     var ac=new AbortController();
     var tid=setTimeout(function(){ac.abort();},3000);
     return fetch(url,{signal:ac.signal}).then(function(r){
@@ -1736,7 +1850,7 @@ const char MAIN_page[] PROGMEM = R"=====(
     try{
       var ws=new WebSocket('ws://'+location.host+'/joystick');
       ws.binaryType='arraybuffer';
-      ws.onopen=function(){wsConnected=true;wsLastActivity=performance.now();evlog('info','WebSocket bağlandı');updateDebugPanel();};
+      ws.onopen=function(){wsConnected=true;wsLastActivity=performance.now();evlog('info','WebSocket bağlandı');updateDebugPanel();loadAutoModes();};
       ws.onclose=function(){wsConnected=false;wsJoystick=null;scheduleReconnect();updateDebugPanel();};
       ws.onerror=function(){wsConnected=false;};
       ws.onmessage=handleWsMessage;
@@ -2195,6 +2309,7 @@ const char MAIN_page[] PROGMEM = R"=====(
     fetchState();
     fetchHealth();
     fetchInfo();
+    loadAutoModes();
   });
   </script>
 </body>

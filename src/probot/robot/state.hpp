@@ -49,6 +49,9 @@ namespace probot::robot {
     void setAutoStartMs(uint32_t now_ms, uint32_t ms){ writeField(now_ms, [&](StateSnapshot& w){ w.autoStartMs = ms; }); }
     void setClientCount(uint32_t now_ms, int32_t c){ writeField(now_ms, [&](StateSnapshot& w){ w.clientCount = c; }); }
     void setDeadlineMiss(uint32_t now_ms, bool v){ writeField(now_ms, [&](StateSnapshot& w){ w.deadlineMiss = v; }); }
+    // Publish a non-snapshot service change (for example, a selected auto ID)
+    // through the same sequence used by the Driver Station WS push task.
+    void touch(uint32_t now_ms){ writeField(now_ms, [](StateSnapshot&){}); }
 
     // Readers take the same short critical section as writers: a
     // double buffer alone cannot protect a reader that gets preempted
