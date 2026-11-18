@@ -62,6 +62,7 @@ void autonomousStop() {}           // Auto'dan her çıkışta güvenli durdur
 | `JoystickTest` | Eksen/buton değerlerini Serial'e ve telemetri paneline basar. İlk deneme için. |
 | `TankDrive` | Çift motor tank sürüşü (BTS7960/IBT-2 tarzı sürücü). Motor kodunun şablonu. |
 | `ServoTest` | Joystick ile servo kontrolü — titreşimsiz servo kullanımının doğru yolu. |
+| `AutonomousChooser` | Tek firmware'de birden fazla otonom rutin; START'tan önce Driver Station'dan biri seçilir. Rehber: `docs/guides/autochooser-tr.md`. |
 
 ## Ayar makroları
 

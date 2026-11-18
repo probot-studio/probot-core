@@ -7,6 +7,7 @@
 #include <Arduino.h>
 #include <Preferences.h>
 #include <DNSServer.h>
+#include <probot/robot/autonomous.hpp>
 #include <probot/robot/state.hpp>
 #include <probot/core/lifecycle.hpp>
 #include <probot/io/battery.hpp>
@@ -154,6 +155,7 @@ namespace probot::driverstation::esp32 {
           // nvsCh == 0 → "use firmware default": leave autoMode/channel_ as is.
         }
       }
+      restoreAutoSelection();
 
       if (autoMode) {
         // Auto-select: scan the band and pick the least congested of the
@@ -246,6 +248,7 @@ namespace probot::driverstation::esp32 {
       registerUri("/",                HTTP_GET,  handleRoot);
       registerUri("/updateController", HTTP_POST, handleUpdateController);
       registerUri("/robotControl",     HTTP_GET,  handleRobotControl);
+      registerUri("/getAutoModes",     HTTP_GET,  handleGetAutoModes);
       registerUri("/setChannel",       HTTP_GET,  handleSetChannel);
       registerUri("/getState",         HTTP_GET,  handleGetState);
       registerUri("/getBattery",       HTTP_GET,  handleGetBattery);
@@ -425,6 +428,36 @@ namespace probot::driverstation::esp32 {
     // Streams 'S' (state+health JSON, also the heartbeat) and 'T'
     // (telemetry text) frames so the page never polls over HTTP.
 
+    // ── Autonomous routine selection (persisted in NVS "probot"/"auto") ──
+    // Survives reset and brownout. A saved id missing from the current
+    // catalog (another sketch was uploaded) falls back to the default.
+    static void restoreAutoSelection() {
+      auto& autos = probot::autonomous::registry();
+      if (!autos.inUse() || autos.registrationError()) return;
+      char saved[probot::autonomous::MAX_ID_LENGTH + 1] = {0};
+      Preferences prefs;
+      if (!prefs.begin("probot", /*readOnly=*/true)) return;
+      if (prefs.isKey("auto")) prefs.getString("auto", saved, sizeof(saved));
+      prefs.end();
+      if (saved[0] == '\0') return;
+      if (autos.restoreSelection(saved)) {
+        Serial.printf("[AUTO ] Restored selection '%s'\n", saved);
+      } else {
+        Serial.printf("[AUTO ] Saved selection '%s' is not in the catalog; using the default\n", saved);
+      }
+    }
+
+    // Writes only when the stored id differs (NVS wear, flash stall).
+    static bool saveAutoSelection(const char* id) {
+      Preferences prefs;
+      if (!prefs.begin("probot", /*readOnly=*/false)) return false;
+      char cur[probot::autonomous::MAX_ID_LENGTH + 1] = {0};
+      if (prefs.isKey("auto")) prefs.getString("auto", cur, sizeof(cur));
+      bool ok = strcmp(cur, id) == 0 || prefs.putString("auto", id) == strlen(id);
+      prefs.end();
+      return ok;
+    }
+
     size_t buildStateHealthJson(char* out, size_t out_size, const robot::StateSnapshot& s, uint32_t now) {
       uint32_t joyLast = _gs.lastWriteMs();
       long joyAge = -1;
@@ -435,10 +468,13 @@ namespace probot::driverstation::esp32 {
       // Battery as fixed-point decivolts — float printf support varies by
       // libc build, and a dropped %f would corrupt the whole JSON frame.
       unsigned battDv = batteryDecivolts(s);
+      const auto autos = probot::autonomous::registry().snapshot();
+      const char* autoSel = autos.selectedId();
       int n = snprintf(out, out_size,
         "{\"status\":%u,\"phase\":%u,\"selectedMode\":\"%s\",\"autoPeriodSeconds\":%d,"
         "\"autoRemainingMs\":%u,\"batt\":%u.%u,\"rssi\":%d,\"up\":%lu,\"heap\":%lu,\"dm\":%s,"
-        "\"estop\":%s,\"joyAgeMs\":%ld,\"sta\":%ld,\"disc\":%u}",
+        "\"estop\":%s,\"joyAgeMs\":%ld,\"sta\":%ld,\"disc\":%u,"
+        "\"autoChooser\":%s,\"autoChooserError\":%s,\"selectedAutoId\":\"%s\"}",
         static_cast<unsigned>(s.status),
         static_cast<unsigned>(s.phase),
         opModeName(s.selectedMode),
@@ -452,7 +488,10 @@ namespace probot::driverstation::esp32 {
         __atomic_load_n(&probot::robot::g_estop_latched, __ATOMIC_SEQ_CST) ? "true" : "false",
         joyAge,
         (long)diag::g_sta_count,
-        (unsigned)diag::g_last_disc_reason);
+        (unsigned)diag::g_last_disc_reason,
+        autos.inUse() ? "true" : "false",
+        autos.error != probot::autonomous::RegistrationError::NONE ? "true" : "false",
+        autoSel ? autoSel : "");
       if (n < 0) return 0;
       return ((size_t)n >= out_size) ? out_size - 1 : (size_t)n;
     }
@@ -474,7 +513,7 @@ namespace probot::driverstation::esp32 {
         // second so the frame doubles as the link heartbeat.
         auto s = _rs.read();
         if (s.seq != lastStateSeq || (uint32_t)(now - lastStateSent) >= 1000) {
-          char buf[352];
+          char buf[448];
           buf[0] = 'S';
           size_t n = 1 + buildStateHealthJson(buf + 1, sizeof(buf) - 1, s, now);
           _ws.sendToAll(reinterpret_cast<const uint8_t*>(buf), n);
@@ -747,9 +786,12 @@ namespace probot::driverstation::esp32 {
       char cmd[32] = {0};
       char modeVal[12] = {0};
       char autoLenVal[8] = {0};
+      char autoId[probot::autonomous::MAX_ID_LENGTH + 1] = {0};
       httpd_query_key_value(query, "cmd", cmd, sizeof(cmd));
       httpd_query_key_value(query, "val", modeVal, sizeof(modeVal));
       httpd_query_key_value(query, "autoLen", autoLenVal, sizeof(autoLenVal));
+      // A truncated autoId could match a different routine: treat as absent.
+      if (httpd_query_key_value(query, "autoId", autoId, sizeof(autoId)) != ESP_OK) autoId[0] = '\0';
 
       int autoLen = atoi(autoLenVal);
       // autoLen*1000 happens in the sysloop — clamp to avoid signed
@@ -794,13 +836,29 @@ namespace probot::driverstation::esp32 {
           return ESP_OK;
         }
         ds->_rs.setSelectedMode(now, mode);
+      } else if (strcmp(cmd, "selectAuto") == 0) {
+        return ds->selectAutoRoutine(req, s, autoId, now);
       } else if (strcmp(cmd, "init") == 0) {
         if (!core::canAcceptInit(s.phase, s.status)) return conflict("[PB-E409] INIT requires STOPPED — docs/hatalar#pb-e409");
+        probot::autonomous::registry().endRun();
         if (autoLen > 0) ds->_rs.setAutoPeriodSeconds(now, autoLen);
         ds->_rs.setStatus(now, robot::Status::INIT);
         ds->_rs.setDeadlineMiss(now, false);
       } else if (strcmp(cmd, "start") == 0) {
         if (!core::canAcceptStart(s.phase, s.status)) return conflict("[PB-E409] START requires INIT — docs/hatalar#pb-e409");
+        if (s.selectedMode == robot::OpMode::AUTO && probot::autonomous::registry().inUse()) {
+          // Latch the routine the page shows; refuse if the catalog is broken
+          // or the page and robot disagree (stale tab, reboot in between).
+          switch (probot::autonomous::registry().beginRun(autoId)) {
+            case probot::autonomous::RunCheck::OK: break;
+            case probot::autonomous::RunCheck::CATALOG_ERROR:
+              return conflict("[PB-E309] autonomous routine catalog is invalid - see /getAutoModes - docs/hatalar#pb-e309");
+            case probot::autonomous::RunCheck::NO_SELECTION:
+              return conflict("[PB-E409] select an autonomous routine before START - docs/hatalar#pb-e409");
+            case probot::autonomous::RunCheck::MISMATCH:
+              return conflict("[PB-E409] autoId does not match the selected autonomous routine - docs/hatalar#pb-e409");
+          }
+        }
         if (autoLen > 0) ds->_rs.setAutoPeriodSeconds(now, autoLen);
         ds->_rs.setStatus(now, robot::Status::START);
       } else if (strcmp(cmd, "stop") == 0) {
@@ -812,6 +870,52 @@ namespace probot::driverstation::esp32 {
       }
 
       httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
+      return ESP_OK;
+    }
+
+    esp_err_t selectAutoRoutine(httpd_req_t* req, const robot::StateSnapshot& s,
+                                const char* autoId, uint32_t now) {
+      auto& autos = probot::autonomous::registry();
+      if (!core::canAcceptAutoSelect(s.phase, s.status)) {
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_send(req, "[PB-E409] STOP before selecting an autonomous routine - docs/hatalar#pb-e409", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+      }
+      if (!autos.inUse()) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "no autonomous routine catalog");
+        return ESP_OK;
+      }
+      if (autos.registrationError()) {
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_send(req, "[PB-E309] autonomous routine catalog is invalid - see /getAutoModes - docs/hatalar#pb-e309", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+      }
+      if (!autos.select(autoId)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "unknown autonomous routine id");
+        return ESP_OK;
+      }
+      const bool saved = saveAutoSelection(autoId);
+      _rs.touch(now);   // push the new selection in the next 'S' frame
+      char response[80];
+      snprintf(response, sizeof(response), "{\"ok\":true,\"selectedAutoId\":\"%s\",\"saved\":%s}",
+               autoId, saved ? "true" : "false");
+      httpd_resp_set_type(req, "application/json");
+      httpd_resp_send(req, response, HTTPD_RESP_USE_STRLEN);
+      return ESP_OK;
+    }
+
+    static esp_err_t handleGetAutoModes(httpd_req_t* req) {
+      auto* ds = self(req);
+      if (!ds->enforceOwner(req)) return ESP_OK;
+      // Static, not on the httpd task stack: the server runs one task, so
+      // handlers never run concurrently.
+      static char buf[probot::autonomous::MODES_JSON_CAPACITY];
+      if (!probot::autonomous::buildModesJson(probot::autonomous::registry().snapshot(), buf, sizeof(buf))) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "autonomous catalog serialization failed");
+        return ESP_OK;
+      }
+      httpd_resp_set_type(req, "application/json");
+      httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
       return ESP_OK;
     }
 
@@ -875,16 +979,22 @@ namespace probot::driverstation::esp32 {
 
       auto s = ds->_rs.read();
       unsigned battDv = batteryDecivolts(s);
-      char buf[192];
+      const auto autos = probot::autonomous::registry().snapshot();
+      const char* autoSel = autos.selectedId();
+      char buf[288];
       snprintf(buf, sizeof(buf),
-               "{\"status\":%u,\"phase\":%u,\"selectedMode\":\"%s\",\"autoPeriodSeconds\":%d,\"autoRemainingMs\":%u,\"batt\":%u.%u,\"estop\":%s}",
+               "{\"status\":%u,\"phase\":%u,\"selectedMode\":\"%s\",\"autoPeriodSeconds\":%d,\"autoRemainingMs\":%u,\"batt\":%u.%u,\"estop\":%s,"
+               "\"autoChooser\":%s,\"autoChooserError\":%s,\"selectedAutoId\":\"%s\"}",
                static_cast<unsigned>(s.status),
                static_cast<unsigned>(s.phase),
                opModeName(s.selectedMode),
                (int)s.autoPeriodSeconds,
                (unsigned)computeAutoRemainingMs(s, millis()),
                battDv / 10, battDv % 10,
-               __atomic_load_n(&probot::robot::g_estop_latched, __ATOMIC_SEQ_CST) ? "true" : "false");
+               __atomic_load_n(&probot::robot::g_estop_latched, __ATOMIC_SEQ_CST) ? "true" : "false",
+               autos.inUse() ? "true" : "false",
+               autos.error != probot::autonomous::RegistrationError::NONE ? "true" : "false",
+               autoSel ? autoSel : "");
 
       httpd_resp_set_type(req, "application/json");
       httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);

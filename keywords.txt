@@ -24,6 +24,9 @@ teleopInitLoop	KEYWORD2
 teleopStart	KEYWORD2
 teleopLoop	KEYWORD2
 teleopStop	KEYWORD2
+autonomousConfigure	KEYWORD2
+addRoutine	KEYWORD2
+clearRoutines	KEYWORD2
 makeDefault	KEYWORD2
 getLeftX	KEYWORD2
 getLeftY	KEYWORD2

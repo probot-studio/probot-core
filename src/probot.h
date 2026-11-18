@@ -22,6 +22,9 @@ void teleopInitLoop() __attribute__((weak));
 void teleopStart() __attribute__((weak));
 void teleopLoop();
 void teleopStop();
+// Optional, runs once at boot before the Driver Station starts: register the
+// autonomous routine catalog here (probot::autonomous::addRoutine).
+void autonomousConfigure() __attribute__((weak));
 
 // [PB-E106] "redefinition of `void robotInit()`" / "robotEnd()": these 0.3.x
 //   hooks were removed in 0.4.0 and would silently never run. They are deleted
@@ -39,6 +42,7 @@ void robotEnd() = delete;  // [PB-E106] removed in 0.4.0: move this code into te
 // Driver station communication
 #include <probot/io/gamepad.hpp>
 #include <probot/io/joystick_api.hpp>
+#include <probot/robot/autonomous.hpp>
 #include <probot/devices/leds/builtin.hpp>
 #include <probot/robot/state.hpp>
 #include <probot/robot/system.hpp>

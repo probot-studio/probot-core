@@ -18,6 +18,16 @@ Rules that generated code MUST follow:
   INIT and START with neutral input; `autonomousStart`/`teleopStart` run once
   at START. Do not put these in beginner examples unless their purpose is
   needed.
+- Several autonomous routines selectable from the Driver Station: define
+  `void autonomousConfigure()` and register them there with
+  `probot::autonomous::addRoutine("id", "Label", start, loop, isDefault)`.
+  `start` replaces autonomousStart, `loop` replaces autonomousLoop for the
+  selected routine; autonomousInit/Stop still run, and autonomousLoop must
+  still be defined. id: unique, max 15 chars, only ASCII letters, digits,
+  `-`, `_` (no spaces, no Turkish letters); label: max 31 bytes; max 8
+  routines, at most one default. The short form `addRoutine("Name", start,
+  loop)` uses the name as id AND label, so it must follow the id rules. Any
+  invalid registration rejects the whole catalog (PB-E309).
 - Define `PROBOT_WIFI_AP_SSID`, `PROBOT_WIFI_AP_PASSWORD` (min 8 chars)
   and `PROBOT_WIFI_AP_CHANNEL` (1-13) BEFORE `#include <probot.h>`. For
   a fleet, give each robot a distinct fixed channel by hand. Boot-time
