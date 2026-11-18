@@ -27,4 +27,8 @@ TEST_CASE(state_service_updates_fields){
   EXPECT_TRUE(snap.clientCount == 1);
   EXPECT_TRUE(snap.deadlineMiss);
   EXPECT_TRUE(snap.seq > snap0.seq);
+
+  const auto beforeTouch = snap.seq;
+  state.touch(11u);
+  EXPECT_TRUE(state.read().seq > beforeTouch);
 }

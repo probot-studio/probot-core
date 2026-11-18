@@ -9,6 +9,7 @@
 // Driver station communication
 #include <probot/io/gamepad.hpp>
 #include <probot/io/joystick_api.hpp>
+#include <probot/robot/autonomous.hpp>
 #include <probot/devices/leds/builtin.hpp>
 #include <probot/robot/state.hpp>
 #include <probot/robot/system.hpp>

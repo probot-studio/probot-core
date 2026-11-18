@@ -717,6 +717,13 @@ const char MAIN_page[] PROGMEM = R"=====(
             <span>Autonomous</span>
             <input type="checkbox" id="enableAutonomous" checked>
           </div>
+          <div class="control" id="autoModeControl" style="display:none;">
+            <label for="autoModeSelect">Autonomous Routine</label>
+            <select id="autoModeSelect" onchange="selectAutoMode()">
+              <option value="">Select a routine</option>
+            </select>
+            <span class="hint" id="autoModeStatus">Loading autonomous routines…</span>
+          </div>
         </div>
         <button id="estopButton" class="estop-btn">EMERGENCY STOP</button>
         <div class="auto-progress">
@@ -918,6 +925,11 @@ const char MAIN_page[] PROGMEM = R"=====(
     var selectedGamepadIndex=-1;
     var gamepads={};
     var gamepadDetected=false;
+    var autoModes=[];
+    var autoModesSupported=false;
+    var autoCatalogError=false;
+    var autoSelectionBusy=false;
+    var confirmedAutoId="";
 
     var headerStatusValue=document.getElementById('headerStatusValue');
     var headerStatusDetail=document.getElementById('headerStatusDetail');
@@ -1005,6 +1017,87 @@ const char MAIN_page[] PROGMEM = R"=====(
       if(autoModeEnabled) setPhaseDisplay('auto');
     }
 
+    function setAutoModeStatus(message, isError){
+      var status=document.getElementById('autoModeStatus');
+      if(!status) return;
+      status.textContent=message;
+      status.style.color=isError?'#b42318':'';
+    }
+
+    function renderAutoModes(data){
+      var control=document.getElementById('autoModeControl');
+      var select=document.getElementById('autoModeSelect');
+      if(!control||!select) return;
+      autoModes=Array.isArray(data.modes)?data.modes:[];
+      autoModesSupported=data.supported===true&&autoModes.length>0;
+      autoCatalogError=data.registrationError===true;
+      control.style.display=(autoModesSupported||autoCatalogError)?'flex':'none';
+      select.innerHTML='';
+      var placeholder=document.createElement('option');
+      placeholder.value='';
+      placeholder.textContent='Select a routine';
+      select.appendChild(placeholder);
+      autoModes.forEach(function(mode){
+        var option=document.createElement('option');
+        option.value=mode.id;
+        option.textContent=mode.label;
+        select.appendChild(option);
+      });
+      confirmedAutoId=(typeof data.selected==='string')?data.selected:'';
+      select.value=confirmedAutoId;
+      if(autoCatalogError) setAutoModeStatus('AutoChooser setup error. Check routine IDs and defaults.',true);
+      else if(confirmedAutoId) setAutoModeStatus('Selected: '+(autoModes.find(function(m){return m.id===confirmedAutoId;})||{}).label,false);
+      else setAutoModeStatus('Select a routine before starting autonomous.',false);
+      updateAutoModeLock();
+    }
+
+    function loadAutoModes(){
+      fetch('/getAutoModes',{cache:'no-store'}).then(function(r){
+        if(!r.ok) throw new Error('AutoChooser unavailable');
+        return r.json();
+      }).then(function(data){renderAutoModes(data);}).catch(function(){
+        autoModesSupported=false;
+        var control=document.getElementById('autoModeControl');
+        if(control) control.style.display='none';
+      });
+    }
+
+    function updateAutoModeLock(){
+      var select=document.getElementById('autoModeSelect');
+      if(!select) return;
+      select.disabled=autoCatalogError||autoSelectionBusy||controlState==='running';
+    }
+
+    function selectAutoMode(){
+      var select=document.getElementById('autoModeSelect');
+      if(!select||autoSelectionBusy) return;
+      var id=select.value;
+      if(!id){
+        select.value=confirmedAutoId;
+        setAutoModeStatus(confirmedAutoId?'A registered routine must remain selected.':'Select a routine before starting autonomous.',!confirmedAutoId);
+        return;
+      }
+      autoSelectionBusy=true;
+      lastCmdMs=performance.now();
+      updateAutoModeLock();
+      setAutoModeStatus('Applying selection…',false);
+      fetch('/robotControl?cmd=selectAuto&autoId='+encodeURIComponent(id)).then(function(r){
+        if(!r.ok) throw new Error('Selection rejected ('+r.status+')');
+        return r.json();
+      }).then(function(data){
+        confirmedAutoId=data.selectedAutoId||'';
+        select.value=confirmedAutoId;
+        var mode=autoModes.find(function(m){return m.id===confirmedAutoId;});
+        setAutoModeStatus(mode?'Selected: '+mode.label:'No routine selected',!mode);
+      }).catch(function(err){
+        select.value=confirmedAutoId;
+        setAutoModeStatus(err.message||'Could not select routine.',true);
+      }).finally(function(){
+        autoSelectionBusy=false;
+        updateAutoModeLock();
+      });
+    }
+
     function startAutoTimer(duration){
       autoModeEnabled=true;
       autoRemaining=duration;
@@ -1038,9 +1131,19 @@ const char MAIN_page[] PROGMEM = R"=====(
     var lastCmdMs=-10000;
     function applyState(data){
         if(!data) return;
+        var ignoreRecentCommandState=performance.now()-lastCmdMs<600;
+      if(data.autoChooserError===true){
+        autoCatalogError=true;
+        setAutoModeStatus('AutoChooser setup error. Check routine IDs and defaults.',true);
+      }
+        if(!ignoreRecentCommandState&&data.autoChooser===true&&typeof data.selectedAutoId==='string'&&!autoSelectionBusy){
+          confirmedAutoId=data.selectedAutoId;
+          var autoSelect=document.getElementById('autoModeSelect');
+          if(autoSelect&&autoModesSupported) autoSelect.value=confirmedAutoId;
+        }
         var estopOv=document.getElementById('estopOverlay');
         if(estopOv) estopOv.classList.toggle('show',data.estop===true);
-        if(performance.now()-lastCmdMs<600) return;
+        if(ignoreRecentCommandState) return;
         var btn=document.getElementById('robotButton');
         if(!btn) return;
 
@@ -1102,6 +1205,7 @@ const char MAIN_page[] PROGMEM = R"=====(
           stopAutoTimer();
           setPhaseDisplay('stopped');
         }
+        updateAutoModeLock();
     }
 
     var fetchStateBusy=false;
@@ -1134,15 +1238,29 @@ const char MAIN_page[] PROGMEM = R"=====(
         default: cmd="stop"; break;
       }
 
+      if(cmd==='start'&&enableAuto&&(autoCatalogError||(autoModesSupported&&!confirmedAutoId))){
+        if(!autoCatalogError) setAutoModeStatus('Select a routine before starting autonomous.',true);
+        return;
+      }
+      if(cmd==='start'&&autoSelectionBusy){
+        setAutoModeStatus('Wait for the autonomous selection to be confirmed.',true);
+        return;
+      }
+
       lastCmdMs=performance.now();
       var url='/robotControl?cmd='+cmd+'&auto='+(enableAuto?1:0)+'&autoLen='+autoLen;
+      if(cmd==='start'&&enableAuto&&confirmedAutoId) url+='&autoId='+encodeURIComponent(confirmedAutoId);
       var ac=new AbortController();
       var tid=setTimeout(function(){ac.abort();},3000);
       fetch(url,{signal:ac.signal}).then(function(r){
         clearTimeout(tid);
-        if(!r.ok) console.error("Robot command failed:",r.status);
+        if(!r.ok){
+          return r.text().then(function(message){throw new Error(message||('Robot command failed: '+r.status));});
+        }
       }).catch(function(err){
         console.error("robotControl fetch error:",err);
+        if(cmd==='start'&&enableAuto&&autoModesSupported) setAutoModeStatus(err.message||'Start was rejected.',true);
+        setTimeout(fetchState,650);
       });
 
       var btn=document.getElementById('robotButton');
@@ -1170,6 +1288,7 @@ const char MAIN_page[] PROGMEM = R"=====(
         stopAutoTimer();
         setPhaseDisplay('stopped');
       }
+      updateAutoModeLock();
     }
     document.getElementById('robotButton').addEventListener('click',handleRobotButton);
 
@@ -1656,6 +1775,7 @@ const char MAIN_page[] PROGMEM = R"=====(
       setPhaseDisplay('standby');
       requestAnimationFrame(gamepadLoop);
       connectWebSocket();
+      loadAutoModes();
       fetchState();
       fetchHealth();
       fetchInfo();

@@ -5,6 +5,7 @@
 #include <probot/core/core_config.hpp>
 #include <probot/core/wdt.hpp>
 #include <probot/core/lifecycle.hpp>
+#include <probot/robot/autonomous.hpp>
 
 // Driver-station inactivity → STOP (1, default, safe) or just disconnect (0).
 #ifndef PROBOT_DS_TIMEOUT_MS
@@ -72,6 +73,9 @@ void teleopInit();
 void teleopLoop();
 void autonomousInit();
 void autonomousLoop();
+// Optional configuration hook. Runs once during boot, before the DS starts,
+// so the autonomous catalog is available while the robot is still stopped.
+void autonomousConfigure() __attribute__((weak));
 
 namespace probot {
   namespace detail {
@@ -90,9 +94,21 @@ namespace probot {
 
     inline core::PhaseMachine g_machine;
 
+    inline void robotInitHook(){
+      ::robotInit();
+    }
+
+    inline void autonomousInitHook(){
+      probot::autonomous::registry().dispatchInit(&::autonomousInit);
+    }
+
+    inline void autonomousLoopHook(){
+      probot::autonomous::registry().dispatchPeriodic(&::autonomousLoop);
+    }
+
     inline core::Hooks userHooks(){
-      return core::Hooks{ &::robotInit, &::robotEnd, &::teleopInit,
-                          &::teleopLoop, &::autonomousInit, &::autonomousLoop };
+      return core::Hooks{ &robotInitHook, &::robotEnd, &::teleopInit,
+                          &::teleopLoop, &autonomousInitHook, &autonomousLoopHook };
     }
 
     inline void zeroInputs(){
@@ -311,6 +327,17 @@ namespace probot {
 #endif
 
     wdt_init_no_idle(PROBOT_WDT_TIMEOUT_S, true);
+
+    // Register autonomous routines before the Driver Station comes online.
+    // Older sketches without this optional hook continue to use the legacy
+    // autonomousInit/autonomousLoop callbacks.
+    if (autonomousConfigure) {
+      probot::autonomous::clearRoutines();
+      autonomousConfigure();
+      probot::autonomous::registry().finishRegistration();
+      if (probot::autonomous::registry().registrationError())
+        Serial.println("[AUTO ] Routine catalog has invalid or duplicate entries");
+    }
 
 #ifdef ESP32
     probot::driverstation::start_driver_station();

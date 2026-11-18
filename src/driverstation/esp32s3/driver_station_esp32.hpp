@@ -7,6 +7,7 @@
 #include <Arduino.h>
 #include <Preferences.h>
 #include <DNSServer.h>
+#include <probot/robot/autonomous.hpp>
 #include <probot/robot/state.hpp>
 #include <probot/io/gamepad.hpp>
 #include <probot/telemetry/telemetry.hpp>
@@ -244,6 +245,7 @@ namespace probot::driverstation::esp32 {
       registerUri("/",                HTTP_GET,  handleRoot);
       registerUri("/updateController", HTTP_POST, handleUpdateController);
       registerUri("/robotControl",     HTTP_GET,  handleRobotControl);
+      registerUri("/getAutoModes",      HTTP_GET,  handleGetAutoModes);
       registerUri("/setChannel",       HTTP_GET,  handleSetChannel);
       registerUri("/getState",         HTTP_GET,  handleGetState);
       registerUri("/getBattery",       HTTP_GET,  handleGetBattery);
@@ -413,6 +415,10 @@ namespace probot::driverstation::esp32 {
     // (telemetry text) frames so the page never polls over HTTP.
 
     size_t buildStateHealthJson(char* out, size_t out_size, const robot::StateSnapshot& s, uint32_t now) {
+      const auto autos = probot::autonomous::registry().snapshot();
+      const char* selectedAutoId = (autos.selected >= 0 &&
+          static_cast<size_t>(autos.selected) < autos.count)
+          ? autos.routines[autos.selected].id : "";
       uint32_t joyLast = _gs.lastWriteMs();
       long joyAge = -1;
       if (joyLast) {
@@ -422,7 +428,8 @@ namespace probot::driverstation::esp32 {
       int n = snprintf(out, out_size,
         "{\"phase\":%u,\"autonomousEnabled\":%s,\"autoPeriodSeconds\":%d,"
         "\"autoRemainingMs\":%u,\"rssi\":%d,\"up\":%lu,\"heap\":%lu,\"dm\":%s,"
-        "\"estop\":%s,\"joyAgeMs\":%ld,\"sta\":%ld,\"disc\":%u}",
+        "\"estop\":%s,\"joyAgeMs\":%ld,\"sta\":%ld,\"disc\":%u,"
+        "\"autoChooser\":%s,\"autoChooserError\":%s,\"selectedAutoId\":\"%s\"}",
         static_cast<unsigned>(s.phase),
         s.autonomousEnabled ? "true" : "false",
         (int)s.autoPeriodSeconds,
@@ -434,7 +441,10 @@ namespace probot::driverstation::esp32 {
         __atomic_load_n(&probot::robot::g_estop_latched, __ATOMIC_SEQ_CST) ? "true" : "false",
         joyAge,
         (long)diag::g_sta_count,
-        (unsigned)diag::g_last_disc_reason);
+        (unsigned)diag::g_last_disc_reason,
+        autos.count ? "true" : "false",
+        autos.registrationError ? "true" : "false",
+        selectedAutoId);
       if (n < 0) return 0;
       return ((size_t)n >= out_size) ? out_size - 1 : (size_t)n;
     }
@@ -727,9 +737,11 @@ namespace probot::driverstation::esp32 {
       char cmd[32] = {0};
       char autoVal[8] = {0};
       char autoLenVal[8] = {0};
+      char autoId[probot::autonomous::MAX_ID_LENGTH + 1] = {0};
       httpd_query_key_value(query, "cmd", cmd, sizeof(cmd));
       httpd_query_key_value(query, "auto", autoVal, sizeof(autoVal));
       httpd_query_key_value(query, "autoLen", autoLenVal, sizeof(autoLenVal));
+      httpd_query_key_value(query, "autoId", autoId, sizeof(autoId));
 
       bool enAuto = atoi(autoVal) != 0;
       int autoLen = atoi(autoLenVal);
@@ -757,10 +769,48 @@ namespace probot::driverstation::esp32 {
         return ESP_OK;
       }
 
-      if (strcmp(cmd, "init") == 0) {
+      if (strcmp(cmd, "selectAuto") == 0) {
+        const auto current = ds->_rs.read();
+        if ((current.phase != robot::Phase::NOT_INIT && current.phase != robot::Phase::INITED) ||
+            current.status == robot::Status::START) {
+          httpd_resp_set_status(req, "409 Conflict");
+          httpd_resp_send(req, "Stop the robot before selecting an autonomous routine", HTTPD_RESP_USE_STRLEN);
+          return ESP_OK;
+        }
+        if (probot::autonomous::registry().registrationError()) {
+          httpd_resp_set_status(req, "409 Conflict");
+          httpd_resp_send(req, "Autonomous catalog has a registration error", HTTPD_RESP_USE_STRLEN);
+          return ESP_OK;
+        }
+        if (!probot::autonomous::registry().select(autoId)) {
+          httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Unknown or invalid autonomous ID");
+          return ESP_OK;
+        }
+        ds->_rs.touch(millis());
+        httpd_resp_set_type(req, "application/json");
+        char response[80];
+        snprintf(response, sizeof(response), "{\"ok\":true,\"selectedAutoId\":\"%s\"}", autoId);
+        httpd_resp_send(req, response, HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+      } else if (strcmp(cmd, "init") == 0) {
         ds->_rs.setStatus(millis(), robot::Status::INIT);
         ds->_rs.setDeadlineMiss(millis(), false);
       } else if (strcmp(cmd, "start") == 0) {
+        const auto autos = probot::autonomous::registry().snapshot();
+        if (enAuto && autos.registrationError) {
+          httpd_resp_set_status(req, "409 Conflict");
+          httpd_resp_send(req, "Autonomous catalog has a registration error", HTTPD_RESP_USE_STRLEN);
+          return ESP_OK;
+        }
+        if (enAuto && autos.count > 0) {
+          const auto current = ds->_rs.read();
+          if (current.phase != robot::Phase::INITED || current.status == robot::Status::START ||
+              !probot::autonomous::registry().beginRun(autoId)) {
+            httpd_resp_set_status(req, "409 Conflict");
+            httpd_resp_send(req, "Init the robot and select a valid autonomous routine before Start", HTTPD_RESP_USE_STRLEN);
+            return ESP_OK;
+          }
+        }
         ds->_rs.setAutonomous(millis(), enAuto);
         if (autoLen > 0) ds->_rs.setAutoPeriodSeconds(millis(), autoLen);
         ds->_rs.setStatus(millis(), robot::Status::START);
@@ -833,15 +883,36 @@ namespace probot::driverstation::esp32 {
       if (!ds->enforceOwner(req)) return ESP_OK;
 
       auto s = ds->_rs.read();
-      char buf[160];
+      const auto autos = probot::autonomous::registry().snapshot();
+      const char* selectedAutoId = (autos.selected >= 0 &&
+          static_cast<size_t>(autos.selected) < autos.count)
+          ? autos.routines[autos.selected].id : "";
+      char buf[256];
       snprintf(buf, sizeof(buf),
-               "{\"phase\":%u,\"autonomousEnabled\":%s,\"autoPeriodSeconds\":%d,\"autoRemainingMs\":%u,\"estop\":%s}",
+               "{\"phase\":%u,\"autonomousEnabled\":%s,\"autoPeriodSeconds\":%d,\"autoRemainingMs\":%u,\"estop\":%s,\"autoChooser\":%s,\"autoChooserError\":%s,\"selectedAutoId\":\"%s\"}",
                static_cast<unsigned>(s.phase),
                s.autonomousEnabled ? "true" : "false",
                (int)s.autoPeriodSeconds,
                (unsigned)computeAutoRemainingMs(s, millis()),
-               __atomic_load_n(&probot::robot::g_estop_latched, __ATOMIC_SEQ_CST) ? "true" : "false");
+               __atomic_load_n(&probot::robot::g_estop_latched, __ATOMIC_SEQ_CST) ? "true" : "false",
+               autos.count ? "true" : "false",
+               autos.registrationError ? "true" : "false",
+               selectedAutoId);
 
+      httpd_resp_set_type(req, "application/json");
+      httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
+      return ESP_OK;
+    }
+
+    static esp_err_t handleGetAutoModes(httpd_req_t* req) {
+      auto* ds = self(req);
+      if (!ds->enforceOwner(req)) return ESP_OK;
+      char buf[3072];
+      const auto autos = probot::autonomous::registry().snapshot();
+      if (!probot::autonomous::buildModesJson(autos, buf, sizeof(buf))) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Autonomous catalog serialization failed");
+        return ESP_OK;
+      }
       httpd_resp_set_type(req, "application/json");
       httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
       return ESP_OK;

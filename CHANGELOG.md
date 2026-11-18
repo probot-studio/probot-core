@@ -6,6 +6,16 @@ Biçim [Keep a Changelog](https://keepachangelog.com/), sürümler
 
 ---
 
+## [Unreleased]
+
+### Eklendi
+- Driver Station'a AutoChooser: firmware'de boot sırasında kaydedilen otonom
+  rutinler STOP veya INITED durumunda seçilebilir; Start'ta seçim doğrulanıp
+  çalışma boyunca sabitlenir. Katalog hatasında otonom başlangıcı engellenir.
+- `examples/AutonomousChooser` örneği ve registry/JSON host testleri.
+
+---
+
 ## [0.3.0] — Kooperatif Yaşam Döngüsü + Acil Durdurma
 
 Güvenlik/yaşam döngüsü yeniden tasarımı. Issue #21'deki donma sınıfını

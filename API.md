@@ -46,6 +46,49 @@ STOP ──Init──▶ INITED ──Start──▶ [AUTONOMOUS (N sn)] ──�
   watchdog'lu çalıştırılır, robot **reboot'a kadar kilitlenir**
   (init/start reddedilir). Bkz. HTTP tablosu + "Acil durdurma".
 
+## Otonom rutin seçici (AutoChooser)
+
+Birden fazla firmware'e derlenmiş otonom arasından Driver Station'tan seçim
+yapın. Katalog boot sırasında kaydedilir; DS açıldığında rutinler görünür ve
+seçim Init öncesinde veya sonrasında, Start öncesinde yapılabilir. Init mevcut
+seçimi korur; Start seçilen rutini çalıştırır. Aynı firmware'de
+seçenek değiştirmek için yeniden yükleme gerekmez; yeni kod içeren bir rutin
+eklemek için firmware yeniden yüklenmelidir.
+
+```cpp
+void leftInit() { /* sol başlangıç hazırlığı */ }
+void leftPeriodic() { /* ~50 Hz: sol başlangıç hareketleri */ }
+void rightInit() { /* sağ başlangıç hazırlığı */ }
+void rightPeriodic() { /* ~50 Hz: sağ başlangıç hareketleri */ }
+
+void autonomousConfigure() {
+  probot::autonomous::clearRoutines();
+  probot::autonomous::addRoutine("LeftAuto", leftInit, leftPeriodic, true);
+  probot::autonomous::addRoutine("RightAuto", rightInit, rightPeriodic);
+}
+```
+
+- `autonomousConfigure()` opsiyonel boot hook'udur; katalog burada bir kez
+  kaydedilir. `addRoutine(name, ...)` adı hem kimlik hem DS'te görünen ad yapar.
+  Farklı kimlik/görünen ad gerekiyorsa `addRoutine(id, label, ...)` biçimi
+  korunur.
+- Adlar benzersiz, en fazla 15 karakter ve ASCII harf, rakam, `-`, `_`
+  içermelidir. Ayrı görünen ad UTF-8 olabilir ve en fazla 31 bayttır. En fazla
+  8 rutin kaydedilebilir.
+- Son parametresi `true` olan tek rutin varsayılan olur; birden fazla
+  varsayılan kaydı reddedilir. Varsayılan yoksa DS seçim yapılana kadar
+  otonom Start'ı engeller.
+- Duplicate/bozuk kimlik, callback eksikliği, birden fazla varsayılan veya
+  kapasite taşması katalog hata bayrağını açar. DS hatayı gösterir ve robot
+  otonom başlatmayı reddeder; teleop kullanılabilir.
+- Katalog boot boyunca sabit kalır. Aynı firmware içindeki seçim DS'ten
+  yapılır; seçim çalışan otonom sırasında değiştirilemez. `robotInit()` normal
+  robot donanım başlangıcı için kullanılmaya devam eder.
+- Katalog boşsa `autonomousInit()` ve `autonomousLoop()` önceki sketch'lerdeki
+  gibi çalışır. Katalog doluysa kütüphane seçili rutinin iki callback'ini
+  çağırır; altı lifecycle hook'u yine sketch'te tanımlanmalıdır.
+- Örnek: `examples/AutonomousChooser`.
+
 ## Joystick
 
 ```cpp
@@ -196,11 +239,13 @@ yazacaksanız:
 | `/` | GET | gerekli | Driver Station arayüzü (SPA) |
 | `/joystick` | WS | gerekli | Çift yönlü binary kanal (çerçeve formatları aşağıda) |
 | `/updateController` | POST | gerekli | JSON fallback: `{"axes":[...],"buttons":[...]}` — WS koptuğunda |
-| `/robotControl?cmd=init\|start\|stop\|cancelAuto&auto=0\|1&autoLen=N` | GET | gerekli | Faz komutları. Estop kilitliyken `init`/`start` reddedilir (409) |
+| `/robotControl?cmd=init\|start\|stop\|cancelAuto&auto=0\|1&autoLen=N` | GET | gerekli | Faz komutları. AutoChooser varsa `start` ayrıca doğrulanmış `autoId` ister |
+| `/robotControl?cmd=selectAuto&autoId=ID` | GET | gerekli | Yalnız robot çalışmıyorken kayıtlı otonom seçer; bilinmeyen ID 400, aktif faz 409 |
+| `/getAutoModes` | GET | gerekli | Kayıtlı rutin kimlikleri/adları, varsayılan ve seçili rutin |
 | `/robotControl?cmd=estop` | GET | gerekli | **Acil durdurma**: kullanıcı task'ı öldürülür, `robotEnd()` watchdog'lu (`PROBOT_ESTOP_END_MS`) çalışır, enable pini kesilir, robot reboot'a kadar kilitlenir |
 | `/robotControl?cmd=reboot` | GET | gerekli | Çipi yeniden başlatır (`ESP.restart()`) — estop kilidini temizlemenin yolu |
 | `/setChannel?ch=N` | GET | gerekli | Kanalı NVS'e kaydet; 1-13 ise CSA ile **canlı** geçiş (zaten o kanaldaysa `live:false`), `0` = kaydı temizle, açılışta firmware varsayılanına dön. Dönüş: `{"ok":b,"ch":N,"live":b}` |
-| `/getState` | GET | gerekli | `{"phase":N,"autonomousEnabled":b,"autoPeriodSeconds":N,"autoRemainingMs":N,"estop":b}` (WS yokken fallback) |
+| `/getState` | GET | gerekli | Faz, otonom sayacı, E-stop ve varsa `autoChooser` / `selectedAutoId` (WS yokken fallback) |
 | `/telemetry` | GET | gerekli | Telemetri tamponunun içeriği (text) (WS yokken fallback) |
 | `/getBattery` | GET | serbest | Pil gerilimi (şu an kullanıcı beslemeli) |
 | `/health` | GET | serbest | `{"rssi":N,"up":ms,"heap":N,"dm":b,"joyAgeMs":N,"sta":N,"disc":N}` — izleme/hakem için. `joyAgeMs`: son joystick paketinin yaşı (-1 = hiç gelmedi), `sta`: bağlı istemci sayısı, `disc`: son kopuşun IEEE reason kodu |

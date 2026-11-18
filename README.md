@@ -61,6 +61,7 @@ void autonomousLoop() { delay(100); }
 | `JoystickTest` | Eksen/buton değerlerini Serial'e ve telemetri paneline basar. İlk deneme için. |
 | `TankDrive` | Çift motor tank sürüşü (BTS7960/IBT-2 tarzı sürücü). Motor kodunun şablonu. |
 | `ServoTest` | Joystick ile servo kontrolü — titreşimsiz servo kullanımının doğru yolu. |
+| `AutonomousChooser` | Derlenmiş sol/sağ otonom rutinler arasında DS'ten seçim yapar; seçenekler arasında geçişte yeniden yükleme gerekmez. |
 
 ## Ayar makroları
 
